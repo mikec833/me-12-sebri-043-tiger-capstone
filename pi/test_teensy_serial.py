@@ -36,8 +36,8 @@ if __name__ == "__main__":
     ser = serial.Serial(port, 115200, timeout=0.2)
     time.sleep(1.0)
 
-    print("Sending forward test command: V,0.15,0.0")
-    ser.write(b"V,0.15,0.0\n")
+    print("Sending forward test command: M,0.25")
+    ser.write(b"M,0.25\n")
 
     for i in range(25):
         line = ser.readline()
