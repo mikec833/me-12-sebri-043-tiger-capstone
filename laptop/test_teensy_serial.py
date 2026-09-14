@@ -1,39 +1,31 @@
 #!/usr/bin/env python3
 """
-test_teensy_serial.py
+test_teensy_serial.py  (laptop version)
 ------------------------------------------------------------------------------
-Bench-test tool for the Teensy bridge: shows a periodically-updating encoder
-summary while letting you type a motor speed command at any time -- e.g. run
-this, watch ticks sit near zero, type "0.25", and watch ticks/s respond.
+Same bench-test tool as pi/test_teensy_serial.py -- send a motor speed
+command, watch encoder ticks respond -- but for testing the Teensy directly
+from your laptop over USB (bypassing the Pi entirely), e.g. to isolate the
+Teensy/Sabertooth/encoder hardware from anything Pi-side.
+
+The only real difference from the Pi version is port auto-detection: on
+macOS, a Teensy enumerates as /dev/cu.usbmodemXXXXXXX (the exact number
+varies per connect/board), not /dev/ttyACM0 like on Linux. This script globs
+for that pattern first, then falls back to the Linux-style names in case you
+ever run it from a Linux machine instead.
 
 WHY THIS PRINTS A SUMMARY ONCE EVERY PRINT_INTERVAL_S INSTEAD OF EVERY RAW
-LINE: an earlier version printed every incoming line immediately (10x/sec,
-since the Teensy streams encoder data every 100ms). That's often enough that
-a print can land in the middle of you typing a character -- since the
-printing thread and your keystrokes share the same terminal, this doesn't
-queue politely, it visually SPLICES together, e.g. typing "1" right as a
-line prints looks like "1E,0,0.00,39776" -- garbage that's actually your own
-keystroke glued to a sensor line. That's almost certainly why some of your
-commands got rejected as "unrecognized" -- the interleaving mangled what you
-typed before you even pressed Enter. Printing ~3x/second instead of 10x
-cuts how often that can happen by roughly the same factor; it won't make it
-literally impossible (there's no way to fully guarantee that in a plain
-terminal without a full curses-style UI), but it should make it rare enough
-to just retype if a line ever looks wrong. Also: avoid the up/down arrow
-keys here -- command history recall doesn't work reliably with a background
-thread writing to the same terminal, and a stray arrow keypress shows up as
-literal "^[[A"-style text (which is itself just another case of the same
-interleaving issue).
-
-Two more things this fixes vs. the original version of this script:
-  1. It no longer stops after a fixed 25 reads (~2-5s) -- it now runs until
-     you quit.
-  2. A typed speed now actually stays in effect. teensy_bridge.ino has a
-     500ms command-timeout watchdog (CMD_TIMEOUT_MS) that stops the motor if
-     it doesn't hear from us -- sending a command once therefore self-cancels
-     in under half a second. This script runs a background thread that keeps
-     re-sending your last commanded speed every 150ms, so it holds until you
-     type a new one.
+LINE: printing every incoming line immediately (10x/sec, since the Teensy
+streams encoder data every 100ms) risks a print landing mid-keystroke --
+since the printing thread and your typing share the same terminal, that
+doesn't queue politely, it visually splices together (e.g. typing "1" right
+as a line prints looks like "1E,0,0.00,39776" -- garbage that's actually
+your own keystroke glued to a sensor line, and a likely cause of commands
+getting rejected as "unrecognized"). Printing ~3x/second instead of 10x
+cuts how often that can happen; it won't make it literally impossible
+without a full curses-style UI, but should make it rare enough that a "just
+retype it" fallback is practical. Also avoid the up/down arrow keys here --
+command history recall doesn't work reliably with a background thread
+writing to the same terminal.
 
 Usage:
     python3 test_teensy_serial.py
@@ -42,13 +34,16 @@ Usage:
     0         <- stop
     q         <- quit
 """
+import glob
 import sys
 import threading
 import time
 
 import serial
 
-PORTS = [
+# Checked in this order; first match wins.
+MACOS_GLOB = "/dev/cu.usbmodem*"
+FALLBACK_PORTS = [
     "/dev/ttyACM0",
     "/dev/ttyACM1",
     "/dev/ttyUSB0",
@@ -60,7 +55,12 @@ PRINT_INTERVAL_S = 0.3       # how often the summary line updates -- see header 
 
 
 def find_port():
-    for port in PORTS:
+    matches = sorted(glob.glob(MACOS_GLOB))
+    if matches:
+        if len(matches) > 1:
+            print(f"# multiple matches for {MACOS_GLOB}, using the first: {matches}")
+        return matches[0]
+    for port in FALLBACK_PORTS:
         try:
             s = serial.Serial(port, 115200, timeout=0.2)
             s.close()
@@ -121,11 +121,8 @@ def sender_thread(ser, state, stop_event):
 def main():
     port = find_port()
     if port is None:
-        print("No Teensy serial port found.")
-        print("Tried:")
-        for p in PORTS:
-            print("  -", p)
-        print("\nCheck that the Teensy is connected and powered.")
+        print(f"No Teensy serial port found (looked for {MACOS_GLOB} and {FALLBACK_PORTS}).")
+        print("Check that the Teensy is connected via USB and powered.")
         sys.exit(1)
 
     print(f"Using serial port: {port}")
