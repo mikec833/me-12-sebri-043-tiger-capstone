@@ -35,9 +35,15 @@ Two more things this fixes vs. the original version of this script:
      re-sending your last commanded speed every 150ms, so it holds until you
      type a new one.
 
+Also reads heading from the BNO085 over the Pi's own UART (bno085_rvc.py) --
+a completely separate physical connection from the Teensy's USB link, so it
+runs independently: if the IMU isn't wired up or /dev/serial0 isn't enabled
+yet, this script still works for motor+encoder, just shows "no IMU" for
+heading instead of crashing.
+
 Usage:
     python3 test_teensy_serial.py
-    (a "ticks: ... | commanded speed: ..." line starts updating immediately)
+    (a "ticks: ... | heading: ... | commanded speed: ..." line updates live)
     0.25      <- type this + Enter: drives motor 1 forward at 25%, holds
     0         <- stop
     q         <- quit
@@ -47,6 +53,8 @@ import threading
 import time
 
 import serial
+
+from bno085_rvc import BNO085RVCReader
 
 PORTS = [
     "/dev/ttyACM0",
@@ -95,13 +103,21 @@ def reader_thread(ser, state, stop_event):
             print(line)  # rare, low-frequency -- fine to print immediately
 
 
-def printer_thread(state, stop_event):
+def printer_thread(state, imu, stop_event):
     """Prints one summary line every PRINT_INTERVAL_S instead of printing
     every raw serial line -- see header comment for why."""
     while not stop_event.is_set():
         with state["lock"]:
             ticks, rate, speed = state["ticks"], state["ticks_per_s"], state["speed"]
-        print(f"ticks: {ticks:6d}  ({rate:+6.1f} ticks/s)   |   commanded speed: {speed:+.2f}")
+
+        if imu is None:
+            heading_str = "not connected"
+        else:
+            yaw, _pitch, _roll, age_s = imu.latest()
+            heading_str = "no data yet" if yaw is None else f"{yaw:+.2f} deg ({age_s * 1000:.0f}ms old)"
+
+        print(f"ticks: {ticks:6d}  ({rate:+6.1f} ticks/s)   |   heading: {heading_str}   |   "
+              f"commanded speed: {speed:+.2f}")
         time.sleep(PRINT_INTERVAL_S)
 
 
@@ -132,11 +148,17 @@ def main():
     ser = serial.Serial(port, 115200, timeout=0.2)
     time.sleep(1.0)
 
+    try:
+        imu = BNO085RVCReader().start()
+    except Exception as e:
+        print(f"# could not open IMU UART ({e}) -- continuing without heading")
+        imu = None
+
     stop_event = threading.Event()
     state = {"lock": threading.Lock(), "speed": 0.0, "ticks": 0, "ticks_per_s": 0.0}
 
     threading.Thread(target=reader_thread, args=(ser, state, stop_event), daemon=True).start()
-    threading.Thread(target=printer_thread, args=(state, stop_event), daemon=True).start()
+    threading.Thread(target=printer_thread, args=(state, imu, stop_event), daemon=True).start()
     threading.Thread(target=sender_thread, args=(ser, state, stop_event), daemon=True).start()
 
     print("# type a speed in [-1, 1] + Enter to drive motor 1 (it holds until you "
@@ -175,6 +197,8 @@ def main():
         except serial.SerialException:
             pass
         ser.close()
+        if imu is not None:
+            imu.stop()
         print("Done.")
 
 
