@@ -2,19 +2,19 @@
  * teensy_bridge.ino
  * ---------------------------------------------------------------------------
  * Teensy-side firmware for today's Pi + Teensy integration setup:
- *     BNO085 heading  -----> streamed to the Pi over USB-serial
  *     Pi motor cmd    -----> Sabertooth 2x12 S1 input (R/C mode)
+ *     Encoder ticks   -----> streamed to the Pi over USB-serial
  *
- * The Pi is the brain: it runs the UWB pose script (separately) and, for
- * today, a simple teleop loop, talking to this Teensy over the micro-USB ->
- * USB-A cable. This sketch's only jobs are: read the IMU, drive the motors
- * when told to, and NOT drive the motors if it stops hearing from the Pi.
- * No UWB reading and no path-following logic lives here -- that's the Pi's
- * job now that it's back up.
+ * The Pi is the brain: it runs the UWB pose script (separately), reads the
+ * BNO085 IMU directly over its own UART (the IMU is wired straight to the
+ * Pi, NOT to this Teensy -- there's nothing IMU-related in this file), and
+ * runs a simple teleop loop, talking to this Teensy over the micro-USB ->
+ * USB-A cable. This sketch's only jobs are: drive the motor when told to,
+ * report the encoder, and NOT drive the motor if it stops hearing from the
+ * Pi.
  *
  * SERIAL PROTOCOL (both directions are plain text, newline-terminated):
- *   Teensy -> Pi:  "H,<heading_rad>,<millis>"              sent every HEADING_STREAM_MS
- *                  "E,<ticks>,<ticks_per_s>,<millis>"      sent every ENCODER_STREAM_MS
+ *   Teensy -> Pi:  "E,<ticks>,<ticks_per_s>,<millis>"      sent every ENCODER_STREAM_MS
  *   Pi -> Teensy:  "M,<speed>"                             motor 1 command, speed in [-1, 1]
  *                  "S"                                     stop
  *
@@ -46,57 +46,29 @@
  * Encoder object with the two pins and call .read(); you don't need to
  * write any interrupt code yourself.
  *
- * SAFETY: if no "M"/"S" command arrives within CMD_TIMEOUT_MS, the motors
- * are stopped automatically -- a dropped USB connection or a crashed Pi
- * script should never leave the motors running.
+ * SAFETY: if no "M"/"S" command arrives within CMD_TIMEOUT_MS, the motor is
+ * stopped automatically -- a dropped USB connection or a crashed Pi script
+ * should never leave the motor running. NOTE: this means a controlling
+ * script must keep re-sending the current command faster than
+ * CMD_TIMEOUT_MS, not just send it once -- a single one-off command will
+ * self-cancel in under half a second.
  *
- * LIBRARIES NEEDED (Arduino Library Manager): "Adafruit BNO08x" (it will
- * offer to also install its dependency, Adafruit BusIO -- accept that) and
- * "Encoder" by Paul Stoffregen.
- *
- * BNO085 NOTE: unlike the BNO055 (which you can just poll for an Euler
- * heading any time via getVector()), the BNO08x family is report-driven:
- * you enable a report once, then call getSensorEvent() every loop and it
- * tells you whether a NEW reading arrived. That's why updateHeadingFromIMU()
- * below caches the last heading in a global rather than computing it
- * on demand. We use the SH2_ROTATION_VECTOR report specifically (not
- * SH2_GAME_ROTATION_VECTOR) because it's magnetometer-fused -- an absolute
- * compass-referenced heading, not just a driftier relative one.
- *
- * The quaternion->yaw formula below is the standard one (matches Adafruit's
- * own BNO08x examples), but which physical direction counts as "positive"
- * yaw and where zero points depends on the chip's mounting orientation on
- * your board -- verify it empirically (watch the streamed heading while
- * rotating the robot a known way) before trusting its sign in any future
- * closed-loop control; flip YAW_SIGN below if it's backwards.
+ * LIBRARIES NEEDED (Arduino Library Manager): "Encoder" by Paul Stoffregen.
  *
  * STILL TO DO:
  *   - SABERTOOTH_S1_PIN -- double check it against your actual wiring.
  *   - PULSE_MIN_US/PULSE_NEUTRAL_US/PULSE_MAX_US -- the 1000/1500/2000us
  *     defaults match Sabertooth's standard R/C mode range, but confirm
  *     against your unit's manual/DIP switches if it seems off.
- *   - HEADING_OFFSET_RAD / YAW_SIGN -- convert the BNO085's raw yaw into
- *     whatever frame/sign convention you want. Not needed for today's
- *     smoke test (nothing here uses the UWB frame yet); matters once pose
- *     and heading get combined for real path following.
  */
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_BNO08x.h>
 #include <Encoder.h>
 #include <Servo.h>
 
 // ============================== USER TUNABLES ===============================
 constexpr int MOTOR1_ENC_A_PIN = 21;
 constexpr int MOTOR1_ENC_B_PIN = 22;
-
-constexpr float HEADING_OFFSET_RAD = 0.0f;  // frame-alignment offset; calibrate later
-constexpr float YAW_SIGN = 1.0f;            // flip to -1.0f if heading runs backwards -- see note above
-
-// Set this to an actual GPIO pin number if you've wired the BNO085's RST pin
-// to the Teensy; -1 means "no hardware reset line, use the default I2C reset".
-constexpr int BNO08X_RESET = -1;
 
 // Sabertooth 2x12, R/C mode, motor 1 only for now -- CHANGE THIS PIN to match your wiring.
 constexpr int SABERTOOTH_S1_PIN = 5;
@@ -106,8 +78,7 @@ constexpr int PULSE_MIN_US     = 1000;
 constexpr int PULSE_NEUTRAL_US = 1500;
 constexpr int PULSE_MAX_US     = 2000;
 
-constexpr unsigned long CMD_TIMEOUT_MS    = 500;  // stop the motors if no command in this long
-constexpr unsigned long HEADING_STREAM_MS = 100;  // how often to send heading to the Pi
+constexpr unsigned long CMD_TIMEOUT_MS    = 500;  // stop the motor if no command in this long
 constexpr unsigned long ENCODER_STREAM_MS = 100;  // how often to send encoder ticks to the Pi
 
 // To convert ticks_per_s into something physical once you know your specs:
@@ -120,55 +91,12 @@ constexpr unsigned long ENCODER_STREAM_MS = 100;  // how often to send encoder t
 
 // =============================================================================
 
-Adafruit_BNO08x bno08x(BNO08X_RESET);
-bool imuOk = false;
-
 // Quadrature decode happens in hardware on Teensy where available (else the
 // library falls back to interrupts) -- .read() just returns the current
 // accumulated tick count, no ISR code needed here.
 Encoder motor1Encoder(MOTOR1_ENC_A_PIN, MOTOR1_ENC_B_PIN);
 long lastEncCount = 0;
 unsigned long lastEncStreamMs = 0;
-
-float latestHeadingRad = 0.0f;
-bool haveHeading = false;  // true once at least one real orientation report has arrived
-
-float wrapToPi(float a) {
-  while (a > PI)  a -= 2.0f * PI;
-  while (a < -PI) a += 2.0f * PI;
-  return a;
-}
-
-// Ask the sensor hub for the absolute (magnetometer-fused) orientation
-// report. Must be re-called any time the hub resets (see wasReset() below) --
-// it forgets which reports were enabled across a reset.
-void setReports() {
-  if (!bno08x.enableReport(SH2_ROTATION_VECTOR)) {
-    Serial.println(F("# could not enable BNO085 rotation vector report"));
-  }
-}
-
-// Non-blocking: call every loop(). Updates latestHeadingRad/haveHeading
-// whenever a new orientation report has arrived; does nothing otherwise
-// (the BNO08x is report-driven, not poll-on-demand like the BNO055 was).
-void updateHeadingFromIMU() {
-  if (!imuOk) return;
-  if (bno08x.wasReset()) {
-    Serial.println(F("# BNO085 reset itself -- re-enabling reports"));
-    setReports();
-  }
-  sh2_SensorValue_t event;
-  if (bno08x.getSensorEvent(&event) && event.sensorId == SH2_ROTATION_VECTOR) {
-    float qr = event.un.rotationVector.real;
-    float qi = event.un.rotationVector.i;
-    float qj = event.un.rotationVector.j;
-    float qk = event.un.rotationVector.k;
-    // Standard quaternion -> yaw (rotation about Z) extraction.
-    float yaw = atan2f(2.0f * (qi * qj + qk * qr), (qi * qi - qj * qj - qk * qk + qr * qr));
-    latestHeadingRad = wrapToPi(YAW_SIGN * yaw + HEADING_OFFSET_RAD);
-    haveHeading = true;
-  }
-}
 
 // ------------------------------ motor output --------------------------------
 Servo motor1;
@@ -189,8 +117,7 @@ void stopMotors() {
 
 // ------------------------------ serial protocol ------------------------------
 float cmdSpeed = 0.0f;                   // motor 1 command, [-1, 1]
-unsigned long lastCmdMs = 0;             // 0 at boot -> motors stay stopped until a real command arrives
-unsigned long lastHeadingStreamMs = 0;
+unsigned long lastCmdMs = 0;             // 0 at boot -> motor stays stopped until a real command arrives
 
 void handleSerialCommands() {
   if (!Serial.available()) return;
@@ -222,28 +149,11 @@ void setup() {
   pinMode(MOTOR1_ENC_B_PIN, INPUT_PULLUP);
   stopMotors();
 
-  Wire.begin();
-  imuOk = bno08x.begin_I2C();
-  if (imuOk) {
-    setReports();
-    Serial.println(F("# BNO085 ready"));
-  } else {
-    Serial.println(F("# BNO085 NOT detected -- check wiring"));
-  }
   Serial.println(F("# teensy_bridge ready. Send M,<speed> (-1..1) or S"));
 }
 
 void loop() {
   handleSerialCommands();
-  updateHeadingFromIMU();
-
-  if (haveHeading && millis() - lastHeadingStreamMs >= HEADING_STREAM_MS) {
-    lastHeadingStreamMs = millis();
-    Serial.print(F("H,"));
-    Serial.print(latestHeadingRad, 4);
-    Serial.print(',');
-    Serial.println(millis());
-  }
 
   unsigned long nowMs = millis();
   if (nowMs - lastEncStreamMs >= ENCODER_STREAM_MS) {
