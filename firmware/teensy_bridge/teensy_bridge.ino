@@ -1,81 +1,198 @@
-/*
- * teensy_bridge.ino -- minimal motor + encoder bridge.
- * Motor: Sabertooth 2x12 S1 input (R/C-style pulse, via Servo library).
- * Serial in:  "M,<speed>" (-1..1), or "S" to stop.
- * Serial out: "E,<ticks>,<ticks_per_s>,<millis>" every 100ms.
- * Motor auto-stops if no command arrives within 500ms.
- */
-#include <Arduino.h>
-#include <Encoder.h>
 #include <Servo.h>
 
-constexpr int ENC_1_A_PIN = 21;
-constexpr int ENC_1_B_PIN = 22;
-constexpr int ENC_2_A_PIN = 19; %
-constexpr int ENC_2_B_PIN = 20; %
+// TigerBall 500 mm BENCH controller
+// Board: Teensy 3.2
+// Driver: Sabertooth 2x12 in independent R/C mode, linear response,
+//         loss-of-signal timeout enabled.
+//
+// Wiring:
+//   Teensy pin 20 -> Sabertooth S1 (left)
+//   Teensy pin 21 -> Sabertooth S2 (right)
+//   Teensy GND    -> Sabertooth 0V
+//   Sabertooth 5V -> NOT CONNECTED
+//
+// This is an open-loop, wheels-raised bench controller. The exact Sabertooth
+// DIP configuration and accepted pulse endpoints must be checked on the
+// physical board before the wheels touch the ground.
 
 constexpr int S1_PIN = 5;
-constexpr int S1_PIN = 3;
-constexpr int PULSE_MIN_US     = 1000;
-constexpr int PULSE_NEUTRAL_US = 1500;
-constexpr int PULSE_MAX_US     = 2000;
-constexpr unsigned long CMD_TIMEOUT_MS    = 500;
-constexpr unsigned long ENCODER_STREAM_MS = 100;
+constexpr int S2_PIN = 3;
+constexpr int NEUTRAL_PULSE_US = 1500;
+constexpr int PULSE_SPAN_US = 500;  // Proposed full range: 1000 to 2000 us.
 
-Encoder encoder(ENC_A_PIN, ENC_B_PIN);
-Servo motor;
+// Change one value to -1 only if that wheel moves opposite to the requested
+// direction. Establish this with the wheels raised and a 10% command.
+constexpr int8_t LEFT_POLARITY = 1;
+constexpr int8_t RIGHT_POLARITY = 1;
 
-float cmdSpeed = 0.0f;
-unsigned long lastCmdMs = 0;
-long lastCount = 0;
-unsigned long lastStreamMs = 0;
+// The GUI refreshes a held command every 100 ms. If commands disappear, the
+// Teensy commands neutral and disarms. This is a software timeout, not the
+// final hardware-watchdog implementation required for animal use.
+constexpr uint32_t COMMAND_TIMEOUT_MS = 400;
 
-void setMotor(float speed) {
-  speed = constrain(speed, -1.0f, 1.0f);
-  motor.writeMicroseconds(PULSE_NEUTRAL_US + (int)(speed * (PULSE_MAX_US - PULSE_NEUTRAL_US)));
+Servo leftOutput;
+Servo rightOutput;
+
+bool armed = false;
+bool emergencyStopLatched = false;
+uint32_t lastValidCommandMs = 0;
+int leftPercent = 0;
+int rightPercent = 0;
+
+char usbBuffer[64];
+char uartBuffer[64];
+size_t usbLength = 0;
+size_t uartLength = 0;
+
+int percentToPulse(int percent, int polarity) {
+  percent = constrain(percent, -100, 100);
+  return NEUTRAL_PULSE_US + (percent * polarity * PULSE_SPAN_US) / 100;
 }
 
-void handleSerial() {
-  if (!Serial.available()) return;
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-  if (line.startsWith("M,")) {
-    cmdSpeed = line.substring(2).toFloat();
-    lastCmdMs = millis();
-  } else if (line == "S") {
-    cmdSpeed = 0.0f;
-    lastCmdMs = millis();
+void writeOutputs(int requestedLeft, int requestedRight) {
+  leftPercent = constrain(requestedLeft, -100, 100);
+  rightPercent = constrain(requestedRight, -100, 100);
+  leftOutput.writeMicroseconds(percentToPulse(leftPercent, LEFT_POLARITY));
+  rightOutput.writeMicroseconds(percentToPulse(rightPercent, RIGHT_POLARITY));
+}
+
+void neutralNow() {
+  writeOutputs(0, 0);
+}
+
+void replyBoth(const char *message) {
+  Serial.println(message);
+  Serial2.println(message);
+}
+
+void handleLine(char *line) {
+  while (*line == ' ' || *line == '\t') ++line;
+
+  if (strcmp(line, "ARM") == 0) {
+    neutralNow();
+    if (emergencyStopLatched) {
+      replyBoth("ERR,ESTOP_LATCHED");
+      return;
+    }
+    armed = true;
+    lastValidCommandMs = millis();
+    replyBoth("OK,ARMED");
+    return;
+  }
+
+  if (strcmp(line, "STOP") == 0) {
+    neutralNow();
+    lastValidCommandMs = millis();
+    replyBoth("OK,STOPPED");
+    return;
+  }
+
+  if (strcmp(line, "DISARM") == 0) {
+    neutralNow();
+    armed = false;
+    replyBoth("OK,DISARMED");
+    return;
+  }
+
+  if (strcmp(line, "ESTOP") == 0) {
+    neutralNow();
+    armed = false;
+    emergencyStopLatched = true;
+    replyBoth("OK,ESTOP_LATCHED");
+    return;
+  }
+
+  if (strcmp(line, "RESET_ESTOP") == 0) {
+    neutralNow();
+    armed = false;
+    emergencyStopLatched = false;
+    replyBoth("OK,ESTOP_RESET_DISARMED");
+    return;
+  }
+
+  if (strcmp(line, "PING") == 0) {
+    if (armed && !emergencyStopLatched) {
+      lastValidCommandMs = millis();
+      replyBoth("OK,PONG");
+    } else {
+      replyBoth("ERR,DISARMED");
+    }
+    return;
+  }
+
+  int requestedLeft = 0;
+  int requestedRight = 0;
+  if (sscanf(line, "MOVE,%d,%d", &requestedLeft, &requestedRight) == 2) {
+    if (!armed || emergencyStopLatched) {
+      neutralNow();
+      replyBoth(emergencyStopLatched ? "ERR,ESTOP_LATCHED" : "ERR,DISARMED");
+      return;
+    }
+
+    requestedLeft = constrain(requestedLeft, -100, 100);
+    requestedRight = constrain(requestedRight, -100, 100);
+    writeOutputs(requestedLeft, requestedRight);
+    lastValidCommandMs = millis();
+
+    char response[48];
+    snprintf(response, sizeof(response), "OK,MOVE,%d,%d", requestedLeft, requestedRight);
+    replyBoth(response);
+    return;
+  }
+
+  neutralNow();
+  replyBoth("ERR,BAD_COMMAND");
+}
+
+void servicePort(Stream &port, char *buffer, size_t &length, size_t capacity) {
+  while (port.available() > 0) {
+    const char incoming = static_cast<char>(port.read());
+
+    if (incoming == '\n' || incoming == '\r') {
+      if (length > 0) {
+        buffer[length] = '\0';
+        handleLine(buffer);
+        length = 0;
+      }
+      continue;
+    }
+
+    if (length < capacity - 1) {
+      buffer[length++] = incoming;
+    } else {
+      length = 0;
+      neutralNow();
+      armed = false;
+      replyBoth("ERR,LINE_TOO_LONG_DISARMED");
+    }
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  motor.attach(S1_PIN);
-  setMotor(0.0f);
+  // Attach first and establish neutral before accepting any command.
+  leftOutput.attach(S1_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
+                    NEUTRAL_PULSE_US + PULSE_SPAN_US);
+  rightOutput.attach(S2_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
+                     NEUTRAL_PULSE_US + PULSE_SPAN_US);
+  neutralNow();
+
+  Serial.begin(115200);   // Teensy USB serial: PC or Pi USB connection.
+  Serial2.begin(115200);  // Pi GPIO UART: Teensy RX2 pin 9, TX2 pin 10.
+
+  delay(500);
+  neutralNow();
+  replyBoth("READY,TIGERBALL_50CM_BENCH,DISARMED");
 }
 
 void loop() {
-  handleSerial();
+  servicePort(Serial, usbBuffer, usbLength, sizeof(usbBuffer));
+  servicePort(Serial2, uartBuffer, uartLength, sizeof(uartBuffer));
 
-  unsigned long now = millis();
-  if (now - lastStreamMs >= ENCODER_STREAM_MS) {
-    long count = encoder.read();
-    float ticksPerSec = (count - lastCount) / ((now - lastStreamMs) / 1000.0f);
-    lastCount = count;
-    lastStreamMs = now;
-    Serial.print("E,");
-    Serial.print(count);
-    Serial.print(',');
-    Serial.print(ticksPerSec, 2);
-    Serial.print(',');
-    Serial.print(now);
-    Serial.print(',');
-    Serial.print(digitalRead(ENC_A_PIN));
-    Serial.print(',');
-    Serial.println(digitalRead(ENC_B_PIN));
-    
+  if (armed && millis() - lastValidCommandMs > COMMAND_TIMEOUT_MS) {
+    neutralNow();
+    armed = false;
+    replyBoth("TIMEOUT,NEUTRAL_DISARMED");
   }
 
-  if (millis() - lastCmdMs > CMD_TIMEOUT_MS) cmdSpeed = 0.0f;
-  setMotor(cmdSpeed);
+  delay(2);
 }

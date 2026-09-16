@@ -18,7 +18,6 @@
     button { min-height:46px; border:1px solid #aebbc7; border-radius:7px; background:white; color:#17212b; font-weight:750; cursor:pointer; touch-action:none; user-select:none; }
     button:disabled { opacity:.42; cursor:not-allowed; }
     #connect { color:#215f96; border-color:var(--blue); flex:1; }
-    #controlKey { min-height:42px; border:1px solid #aebbc7; border-radius:7px; padding:0 10px; width:180px; }
     #arm { color:#176b45; border-color:var(--green); flex:1; } #disarm { flex:1; }
     #estop { color:white; border-color:#9f1f1f; background:var(--red); flex:1.3; }
     #resetEstop { min-height:36px; margin-left:auto; }
@@ -37,14 +36,14 @@
     #right { grid-column:3; grid-row:2; } #reverse { grid-column:2; grid-row:3; }
     .warning { color:#9b2c2c; font-weight:750; } #log { min-height:22px; margin:8px 0 0; color:#334e68; font-size:13px; }
     .help { margin:0; color:#52606d; font-size:13px; }
-    @media(max-width:520px){ .pad{grid-template-rows:repeat(3,74px)} .section{padding:14px} .status{grid-template-columns:1fr} #controlKey{width:100%} }
+    @media(max-width:520px){ .pad{grid-template-rows:repeat(3,74px)} .section{padding:14px} .status{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
 <main>
   <header><h1>TigerBall 50 cm Wi-Fi Bench Drive</h1><p>Laptop/phone → Wi-Fi → Raspberry Pi → USB → Teensy → Sabertooth</p></header>
   <section class="section">
-    <div class="row"><input id="controlKey" type="password" autocomplete="off" placeholder="Control key"><button id="connect">Take control</button><span id="connection">Pi page loaded</span></div>
+    <div class="row"><button id="connect">Take control</button><span id="connection">Pi page loaded</span></div>
     <div class="status"><div id="piBadge" class="badge">Pi: checking</div><div id="serialBadge" class="badge">Teensy: checking</div><div id="leaseBadge" class="badge">Control: not held</div></div>
     <p id="compatibility" class="warning"></p>
   </section>
@@ -65,11 +64,8 @@
 </main>
 <script>
   const $ = id => document.getElementById(id);
-  const els={connect:$('connect'),key:$('controlKey'),connection:$('connection'),compatibility:$('compatibility'),pi:$('piBadge'),serial:$('serialBadge'),lease:$('leaseBadge'),arm:$('arm'),disarm:$('disarm'),estop:$('estop'),resetEstop:$('resetEstop'),state:$('state'),speed:$('speed'),speedValue:$('speedValue'),fullOutput:$('fullOutput'),pulse:$('pulse'),log:$('log'),stop:$('stop'),drives:[$('forward'),$('left'),$('right'),$('reverse')]};
+  const els={connect:$('connect'),connection:$('connection'),compatibility:$('compatibility'),pi:$('piBadge'),serial:$('serialBadge'),lease:$('leaseBadge'),arm:$('arm'),disarm:$('disarm'),estop:$('estop'),resetEstop:$('resetEstop'),state:$('state'),speed:$('speed'),speedValue:$('speedValue'),fullOutput:$('fullOutput'),pulse:$('pulse'),log:$('log'),stop:$('stop'),drives:[$('forward'),$('left'),$('right'),$('reverse')]};
   const clientId=crypto.randomUUID();
-  const queryKey=new URLSearchParams(location.search).get('key');
-  if(queryKey){ els.key.value=queryKey; history.replaceState({},'',location.pathname); }
-  else if(sessionStorage.getItem('tigerballControlKey')) els.key.value=sessionStorage.getItem('tigerballControlKey');
   let connected=false, armed=false, estopLatched=false, activeMotion=null, activeButton=null, commandInFlight=false, statusFailures=0;
   const motions={forward:[1,1],reverse:[-1,-1],left:[-1,1],right:[1,-1]};
   const keys={ArrowUp:'forward',w:'forward',W:'forward',ArrowDown:'reverse',s:'reverse',S:'reverse',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right'};
@@ -80,10 +76,10 @@
   function vector(){if(!activeMotion||!armed)return[0,0];const speed=effectiveSpeed();return[activeMotion[0]*speed,activeMotion[1]*speed];}
   function updateControls(){const canDrive=connected&&armed&&!estopLatched;els.arm.disabled=!connected||!statusSerial||estopLatched;els.disarm.disabled=!connected;els.estop.disabled=!connected;els.resetEstop.disabled=!connected||!estopLatched;els.stop.disabled=!canDrive;els.drives.forEach(button=>button.disabled=!canDrive);els.state.classList.toggle('armed',canDrive);els.connect.textContent=connected?'Release control':'Take control';}
   let statusSerial=false;
-  async function api(action,extra={}){const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,client_id:clientId,key:els.key.value,...extra}),cache:'no-store'});const body=await response.json().catch(()=>({error:`HTTP ${response.status}`}));if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body;}
+  async function api(action,extra={}){const response=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,client_id:clientId,...extra}),cache:'no-store'});const body=await response.json().catch(()=>({error:`HTTP ${response.status}`}));if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body;}
   function applyStatus(s){statusFailures=0;statusSerial=Boolean(s.serial_connected);armed=Boolean(s.armed);estopLatched=Boolean(s.estop_latched);if(connected&&!s.control_owned){connected=false;activeMotion=null;showCommand();log(s.fault||'Control lease ended; robot should be stopped and disarmed.');}els.pi.textContent=`Pi: online${s.simulation?' (SIMULATION)':''}`;els.pi.classList.add('good');els.serial.textContent=s.serial_connected?`Teensy: ${s.serial_port}`:'Teensy: disconnected';els.serial.classList.toggle('good',s.serial_connected);els.lease.textContent=s.control_owned?'Control: this browser':s.control_busy?'Control: another browser':'Control: available';els.lease.classList.toggle('good',s.control_owned);els.connection.textContent=s.control_owned?'Wi-Fi control active':'Pi page loaded';els.state.textContent=s.estop_latched?'EMERGENCY STOP LATCHED':s.armed?'ARMED — HOLD A DIRECTION TO MOVE':'DISARMED';if(s.fault)log(s.fault);else if(s.last_teensy_line)log(`Teensy: ${s.last_teensy_line}`);updateControls();}
   async function pollStatus(){try{const response=await fetch(`/api/status?client_id=${encodeURIComponent(clientId)}`,{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);applyStatus(await response.json());}catch(error){statusFailures++;els.pi.textContent='Pi: unreachable';els.pi.classList.remove('good');if(statusFailures>=2){connected=false;armed=false;activeMotion=null;showCommand();log(`Wi-Fi/Pi link lost: ${error.message}`);updateControls();}}}
-  async function toggleControl(){if(connected){try{await api('release');}catch(_){}connected=false;armed=false;activeMotion=null;showCommand();updateControls();return;}if(!els.key.value){log('Enter the control key printed by the Pi server.');els.key.focus();return;}try{sessionStorage.setItem('tigerballControlKey',els.key.value);const s=await api('claim');connected=true;log('Control acquired. Confirm wheels are raised, then ARM deliberately.');applyStatus(s);}catch(error){log(`Cannot take control: ${error.message}`);}}
+  async function toggleControl(){if(connected){try{await api('release');}catch(_){}connected=false;armed=false;activeMotion=null;showCommand();updateControls();return;}try{const s=await api('claim');connected=true;log('Control acquired. Confirm wheels are raised, then ARM deliberately.');applyStatus(s);}catch(error){log(`Cannot take control: ${error.message}`);}}
   async function action(name){try{applyStatus(await api(name));}catch(error){log(`${name} failed: ${error.message}`);await pollStatus();}}
   async function heartbeat(){if(!connected||commandInFlight)return;commandInFlight=true;const [left,right]=vector();showCommand(left,right);try{applyStatus(await api('heartbeat',{left,right}));}catch(error){connected=false;armed=false;activeMotion=null;showCommand();log(`Heartbeat failed: ${error.message}`);updateControls();}finally{commandInFlight=false;}}
   function startMotion(name,button=null){if(!connected||!armed||estopLatched||!motions[name])return;activeMotion=motions[name];if(activeButton)activeButton.classList.remove('active');activeButton=button||$(name);activeButton?.classList.add('active');void heartbeat();}
@@ -91,7 +87,7 @@
   els.connect.addEventListener('click',toggleControl);els.arm.addEventListener('click',()=>action('arm'));els.disarm.addEventListener('click',()=>{stopMotion();void action('disarm');});els.estop.addEventListener('click',()=>{activeMotion=null;void action('estop');});els.resetEstop.addEventListener('click',()=>action('reset_estop'));els.stop.addEventListener('click',stopMotion);
   els.speed.addEventListener('input',()=>{els.speedValue.textContent=`${effectiveSpeed()}%`;if(activeMotion)void heartbeat();});els.fullOutput.addEventListener('change',()=>{els.speedValue.textContent=`${effectiveSpeed()}%${els.fullOutput.checked?' (forced)':''}`;if(activeMotion)void heartbeat();});
   Object.keys(motions).forEach(name=>{const button=$(name);button.addEventListener('pointerdown',event=>{event.preventDefault();button.setPointerCapture(event.pointerId);startMotion(name,button);});button.addEventListener('pointerup',stopMotion);button.addEventListener('pointercancel',stopMotion);button.addEventListener('lostpointercapture',()=>{if(activeButton===button)stopMotion();});});
-  document.addEventListener('keydown',event=>{const name=keys[event.key];if(!name||event.repeat)return;event.preventDefault();startMotion(name);});document.addEventListener('keyup',event=>{if(keys[event.key]){event.preventDefault();stopMotion();}});window.addEventListener('blur',stopMotion);document.addEventListener('visibilitychange',()=>{if(document.hidden)stopMotion();});window.addEventListener('pagehide',()=>{if(connected)fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'release',client_id:clientId,key:els.key.value}),keepalive:true});});
+  document.addEventListener('keydown',event=>{const name=keys[event.key];if(!name||event.repeat)return;event.preventDefault();startMotion(name);});document.addEventListener('keyup',event=>{if(keys[event.key]){event.preventDefault();stopMotion();}});window.addEventListener('blur',stopMotion);document.addEventListener('visibilitychange',()=>{if(document.hidden)stopMotion();});window.addEventListener('pagehide',()=>{if(connected)fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'release',client_id:clientId}),keepalive:true});});
   setInterval(heartbeat,100);setInterval(pollStatus,300);void pollStatus();updateControls();
 </script>
 </body>

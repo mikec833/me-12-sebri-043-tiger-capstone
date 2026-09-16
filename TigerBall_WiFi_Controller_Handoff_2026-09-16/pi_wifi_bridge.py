@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import glob
 import json
-import secrets
 import signal
 import sys
 import threading
@@ -76,14 +75,12 @@ class BenchBroker:
     def __init__(
         self,
         *,
-        control_key: str,
         serial_port: str | None,
         baud: int,
         browser_timeout_ms: int,
         refresh_ms: int,
         simulate: bool,
     ) -> None:
-        self.control_key = control_key
         self.serial_port_option = serial_port
         self.baud = baud
         self.browser_timeout_s = browser_timeout_ms / 1000.0
@@ -253,10 +250,6 @@ class BenchBroker:
                         self.desired_left = 0
                         self.desired_right = 0
 
-    def _check_key(self, supplied: Any) -> None:
-        if not isinstance(supplied, str) or not secrets.compare_digest(supplied, self.control_key):
-            raise ControlError("Incorrect control key", HTTPStatus.FORBIDDEN)
-
     @staticmethod
     def _client_id(value: Any) -> str:
         if not isinstance(value, str) or not 8 <= len(value) <= 100:
@@ -269,7 +262,6 @@ class BenchBroker:
                 raise ControlError("This browser does not hold the control lease", HTTPStatus.CONFLICT)
 
     def command(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self._check_key(payload.get("key"))
         client_id = self._client_id(payload.get("client_id"))
         action = payload.get("action")
         now = time.monotonic()
@@ -468,7 +460,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
     parser.add_argument("--serial-port", help="Teensy port; default safely auto-detects Teensy identity")
     parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument("--control-key", help="shared GUI key; default generates a new one at startup")
     parser.add_argument("--browser-timeout-ms", type=int, default=350)
     parser.add_argument("--refresh-ms", type=int, default=100)
     parser.add_argument("--simulate", action="store_true", help="never open serial or touch motors")
@@ -482,9 +473,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    control_key = args.control_key or secrets.token_urlsafe(8)
     broker = BenchBroker(
-        control_key=control_key,
         serial_port=args.serial_port,
         baud=args.baud,
         browser_timeout_ms=args.browser_timeout_ms,
@@ -496,8 +485,8 @@ def main() -> int:
 
     mode = "SIMULATION — NO MOTOR OUTPUT" if args.simulate else "BENCH CONTROL"
     print(f"TigerBall Pi Wi-Fi bridge: {mode}", flush=True)
-    print(f"On the Pi: http://127.0.0.1:{args.port}/?key={control_key}", flush=True)
-    print(f"From laptop: http://tigerball-pi.local:{args.port}/?key={control_key}", flush=True)
+    print(f"On the Pi: http://127.0.0.1:{args.port}/", flush=True)
+    print(f"From laptop: http://<this Pi's hostname or IP>:{args.port}/", flush=True)
     print("Keep this terminal open. Ctrl+C requests STOP and DISARM.", flush=True)
 
     def request_shutdown(_signum: int, _frame: Any) -> None:

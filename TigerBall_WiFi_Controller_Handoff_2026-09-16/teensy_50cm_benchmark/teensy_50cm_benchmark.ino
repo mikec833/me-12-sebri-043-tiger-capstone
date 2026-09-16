@@ -15,9 +15,8 @@
 // DIP configuration and accepted pulse endpoints must be checked on the
 // physical board before the wheels touch the ground.
 
-constexpr uint8_t LEFT_SIGNAL_PIN = 20;
-constexpr uint8_t RIGHT_SIGNAL_PIN = 21;
-
+constexpr int S1_PIN = 5;
+constexpr int S2_PIN = 3;
 constexpr int NEUTRAL_PULSE_US = 1500;
 constexpr int PULSE_SPAN_US = 500;  // Proposed full range: 1000 to 2000 us.
 
@@ -171,9 +170,9 @@ void servicePort(Stream &port, char *buffer, size_t &length, size_t capacity) {
 
 void setup() {
   // Attach first and establish neutral before accepting any command.
-  leftOutput.attach(LEFT_SIGNAL_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
+  leftOutput.attach(S1_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
                     NEUTRAL_PULSE_US + PULSE_SPAN_US);
-  rightOutput.attach(RIGHT_SIGNAL_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
+  rightOutput.attach(S2_PIN, NEUTRAL_PULSE_US - PULSE_SPAN_US,
                      NEUTRAL_PULSE_US + PULSE_SPAN_US);
   neutralNow();
 
