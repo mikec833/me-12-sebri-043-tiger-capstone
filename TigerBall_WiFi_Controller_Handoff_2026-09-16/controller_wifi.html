@@ -65,7 +65,13 @@
 <script>
   const $ = id => document.getElementById(id);
   const els={connect:$('connect'),connection:$('connection'),compatibility:$('compatibility'),pi:$('piBadge'),serial:$('serialBadge'),lease:$('leaseBadge'),arm:$('arm'),disarm:$('disarm'),estop:$('estop'),resetEstop:$('resetEstop'),state:$('state'),speed:$('speed'),speedValue:$('speedValue'),fullOutput:$('fullOutput'),pulse:$('pulse'),log:$('log'),stop:$('stop'),drives:[$('forward'),$('left'),$('right'),$('reverse')]};
-  const clientId=crypto.randomUUID();
+  // crypto.randomUUID() only exists in "secure contexts" (HTTPS, or
+  // http://localhost) -- it's undefined when this page is loaded from a
+  // remote address over plain HTTP, which is exactly how it's normally
+  // accessed here (Pi's IP/hostname from a laptop/phone). clientId just
+  // needs to be a reasonably unique opaque string, not a real UUID, so a
+  // plain random string avoids depending on that API entirely.
+  const clientId='client-'+Math.random().toString(36).slice(2)+Date.now().toString(36);
   let connected=false, armed=false, estopLatched=false, activeMotion=null, activeButton=null, commandInFlight=false, statusFailures=0;
   const motions={forward:[1,1],reverse:[-1,-1],left:[-1,1],right:[1,-1]};
   const keys={ArrowUp:'forward',w:'forward',W:'forward',ArrowDown:'reverse',s:'reverse',S:'reverse',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right'};
