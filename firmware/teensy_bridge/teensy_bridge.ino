@@ -9,9 +9,13 @@
 #include <Encoder.h>
 #include <Servo.h>
 
-constexpr int ENC_A_PIN = 21;
-constexpr int ENC_B_PIN = 22;
+constexpr int ENC_1_A_PIN = 21;
+constexpr int ENC_1_B_PIN = 22;
+constexpr int ENC_2_A_PIN = 19; %
+constexpr int ENC_2_B_PIN = 20; %
+
 constexpr int S1_PIN = 5;
+constexpr int S1_PIN = 3;
 constexpr int PULSE_MIN_US     = 1000;
 constexpr int PULSE_NEUTRAL_US = 1500;
 constexpr int PULSE_MAX_US     = 2000;
