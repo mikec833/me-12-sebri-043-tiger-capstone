@@ -58,7 +58,22 @@ def discover_teensy_port(explicit: str | None = None) -> str:
             if "teensy" in identity or getattr(port, "vid", None) == 0x16C0:
                 candidates.append(port.device)
 
-    unique = list(dict.fromkeys(candidates))
+    # Multiple candidate strings can point at the same physical device (a
+    # /dev/serial/by-id/... symlink and the /dev/ttyACM* it resolves to both
+    # get found independently above, via the two different detection methods)
+    # -- dedupe by the real underlying device, not the string, or a single
+    # Teensy looks like two and this refuses to guess between them.
+    seen_real_paths: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        try:
+            real = str(Path(candidate).resolve())
+        except OSError:
+            real = candidate
+        if real not in seen_real_paths:
+            seen_real_paths.add(real)
+            unique.append(candidate)
+
     if len(unique) == 1:
         return unique[0]
     if not unique:

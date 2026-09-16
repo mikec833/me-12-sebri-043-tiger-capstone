@@ -28,7 +28,7 @@ constexpr int8_t RIGHT_POLARITY = 1;
 // The GUI refreshes a held command every 100 ms. If commands disappear, the
 // Teensy commands neutral and disarms. This is a software timeout, not the
 // final hardware-watchdog implementation required for animal use.
-constexpr uint32_t COMMAND_TIMEOUT_MS = 400;
+constexpr uint32_t COMMAND_TIMEOUT_MS = 10000;
 
 Servo leftOutput;
 Servo rightOutput;
