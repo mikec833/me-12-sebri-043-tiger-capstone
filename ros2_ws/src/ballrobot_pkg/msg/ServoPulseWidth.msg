@@ -1,0 +1,2 @@
+uint16 channel
+uint16 pulse_width_in_microseconds
