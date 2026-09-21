@@ -33,11 +33,13 @@ class TeensyInterfaceNode(Node):
         #     10 - QoS setting - mostly 10
         # )
         
-        # Pi -> Teensy: wheel speed references (rad/s)
+        # SUBSCRIBERS
+        # Pi -> Teensy: wheel speed theta_l/r_dot_ref (rad/s)
         self.cmd_sub = self.create_subscription(
             LeftRightFloat32, 'wheel_speed_cmd', self.on_cmd, 10)
 
-        # Teensy -> Pi: measured wheel speed
+        # PUBLISHERS
+        # Teensy -> Pi: measured wheel speed theta_l/r_dot
         self.speed_pub = self.create_publisher(LeftRightFloat32, 'wheel_speed_meas', 10)
 
         # Poll instead of blocking-read so callbacks still get serviced
