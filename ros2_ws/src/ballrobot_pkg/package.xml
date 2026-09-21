@@ -4,7 +4,7 @@
 
 <package format="3">
 
-  <name>ballrobot_bridge</name>
+  <name>ballrobot_pkg</name>
   <version>0.0.0</version>
 
   <description>ROS 2 bridge package for the ball robot.</description>

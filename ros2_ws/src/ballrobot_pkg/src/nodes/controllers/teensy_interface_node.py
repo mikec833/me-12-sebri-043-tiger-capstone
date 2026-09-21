@@ -11,6 +11,7 @@
 import rclpy
 from rclpy.node import Node
 import serial
+import matplotlib.pyplot as plt
 
 from ballrobot_pkg.msg import LeftRightFloat32
 
@@ -25,6 +26,15 @@ class TeensyInterfaceNode(Node):
 
         self.serial_conn = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
         self._seq = 0
+
+        # For the reference-vs-measured plot
+        self.start_time = self.get_clock().now()
+        self.cmd_time = []
+        self.cmd_left = []
+        self.cmd_right = []
+        self.meas_time = []
+        self.meas_left = []
+        self.meas_right = []
 
         # self.subscription = self.create_subscription(
         #     MessageType,
@@ -49,6 +59,10 @@ class TeensyInterfaceNode(Node):
         line = f"REF,{msg.left:.3f},{msg.right:.3f}\n"
         self.serial_conn.write(line.encode('ascii'))
 
+        self.cmd_time.append(self.elapsed_seconds())
+        self.cmd_left.append(msg.left)
+        self.cmd_right.append(msg.right)
+
     def poll_serial(self): # reads wheel speed measurement from serial port and publishes it
         line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
         if not line.startswith('MEAS'):
@@ -62,15 +76,37 @@ class TeensyInterfaceNode(Node):
         speed_msg.seq_num = self._seq
         self.speed_pub.publish(speed_msg)
 
+        self.meas_time.append(self.elapsed_seconds())
+        self.meas_left.append(speed_msg.left)
+        self.meas_right.append(speed_msg.right)
+
         self._seq += 1
+
+    def elapsed_seconds(self):
+        return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+
+    def plot(self):
+        plt.plot(self.cmd_time, self.cmd_left, label='reference left')
+        plt.plot(self.meas_time, self.meas_left, label='measured left')
+        plt.plot(self.cmd_time, self.cmd_right, label='reference right')
+        plt.plot(self.meas_time, self.meas_right, label='measured right')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Wheel speed (rad/s)')
+        plt.legend()
+        plt.show()
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = TeensyInterfaceNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.plot()
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
