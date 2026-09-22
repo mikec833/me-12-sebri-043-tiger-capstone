@@ -13,6 +13,7 @@ from rclpy.node import Node
 import serial
 import csv
 import os
+import glob
 
 from ballrobot_pkg.msg import LeftRightFloat32
 
@@ -31,14 +32,16 @@ class TeensyInterfaceNode(Node):
         self.serial_conn = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
         self._seq = 0
 
-        # For the reference-vs-measured CSV export
+        # For the reference-vs-measured CSV export: one row per measurement,
+        # tagged with whatever reference was in effect at that moment
         self.start_time = self.get_clock().now()
-        self.cmd_time = []
-        self.cmd_left = []
-        self.cmd_right = []
-        self.meas_time = []
-        self.meas_left = []
-        self.meas_right = []
+        self.ref_left = 0.0
+        self.ref_right = 0.0
+        self.log_time = []
+        self.log_ref_left = []
+        self.log_ref_right = []
+        self.log_meas_left = []
+        self.log_meas_right = []
 
         # self.subscription = self.create_subscription(
         #     MessageType,
@@ -64,45 +67,60 @@ class TeensyInterfaceNode(Node):
     def on_cmd(self, msg): # encodes two floats and writes to serial port
         line = f"REF,{msg.left:.3f},{msg.right:.3f}\n"
         self.serial_conn.write(line.encode('ascii'))
+        self.get_logger().info(f'Sent {line.strip()}')
 
-        self.cmd_time.append(self.elapsed_seconds())
-        self.cmd_left.append(msg.left)
-        self.cmd_right.append(msg.right)
+        self.ref_left = msg.left
+        self.ref_right = msg.right
 
-    def poll_serial(self): # reads wheel speed measurement from serial port and publishes it
-        line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
-        if not line.startswith('MEAS'):
-            return
+    def poll_serial(self): # drains every line currently buffered, not just one
+        while True:
+            line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
+            if not line:
+                break
+            if not line.startswith('MEAS'):
+                self.get_logger().info(f'Teensy: {line}')
+                continue
 
-        _, left_rads, right_rads = line.split(',')
+            _, left_rads, right_rads = line.split(',')
 
-        speed_msg = LeftRightFloat32()
-        speed_msg.left = float(left_rads)
-        speed_msg.right = float(right_rads)
-        speed_msg.seq_num = self._seq
-        self.speed_pub.publish(speed_msg)
+            speed_msg = LeftRightFloat32()
+            speed_msg.left = float(left_rads)
+            speed_msg.right = float(right_rads)
+            speed_msg.seq_num = self._seq
+            self.speed_pub.publish(speed_msg)
 
-        self.meas_time.append(self.elapsed_seconds())
-        self.meas_left.append(speed_msg.left)
-        self.meas_right.append(speed_msg.right)
+            self.log_time.append(self.elapsed_seconds())
+            self.log_ref_left.append(self.ref_left)
+            self.log_ref_right.append(self.ref_right)
+            self.log_meas_left.append(speed_msg.left)
+            self.log_meas_right.append(speed_msg.right)
 
-        self._seq += 1
+            self._seq += 1
 
     def elapsed_seconds(self):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
 
+    def next_run_number(self):
+        existing = glob.glob(os.path.join(OUTPUT_DIR, 'wheel_speed_log_run*.csv'))
+        run_numbers = [0]
+        for path in existing:
+            digits = os.path.basename(path)[len('wheel_speed_log_run'):-len('.csv')]
+            if digits.isdigit():
+                run_numbers.append(int(digits))
+        return max(run_numbers) + 1
+
     def save_csv(self):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
+        filename = f'wheel_speed_log_run{self.next_run_number()}.csv'
 
-        with open(os.path.join(OUTPUT_DIR, 'wheel_speed_cmd.csv'), 'w', newline='') as f:
+        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['time_s', 'left', 'right'])
-            writer.writerows(zip(self.cmd_time, self.cmd_left, self.cmd_right))
+            writer.writerow(['time_s', 'ref_left', 'ref_right', 'meas_left', 'meas_right'])
+            writer.writerows(zip(
+                self.log_time, self.log_ref_left, self.log_ref_right,
+                self.log_meas_left, self.log_meas_right))
 
-        with open(os.path.join(OUTPUT_DIR, 'wheel_speed_meas.csv'), 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['time_s', 'left', 'right'])
-            writer.writerows(zip(self.meas_time, self.meas_left, self.meas_right))
+        self.get_logger().info(f'Saved {filename}')
 
 
 def main(args=None):
