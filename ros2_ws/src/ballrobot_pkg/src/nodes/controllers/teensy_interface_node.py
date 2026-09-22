@@ -59,6 +59,8 @@ class TeensyInterfaceNode(Node):
         # Poll instead of blocking-read so callbacks still get serviced
         self.create_timer(0.02, self.poll_serial)  # 50 Hz
 
+        self.get_logger().info(f'Connected to {SERIAL_PORT}, node up and spinning.')
+
     def on_cmd(self, msg): # encodes two floats and writes to serial port
         line = f"REF,{msg.left:.3f},{msg.right:.3f}\n"
         self.serial_conn.write(line.encode('ascii'))
