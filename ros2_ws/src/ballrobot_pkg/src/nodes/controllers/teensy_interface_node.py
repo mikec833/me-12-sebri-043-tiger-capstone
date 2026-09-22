@@ -11,12 +11,16 @@
 import rclpy
 from rclpy.node import Node
 import serial
-import matplotlib.pyplot as plt
+import csv
+import os
 
 from ballrobot_pkg.msg import LeftRightFloat32
 
 SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
+
+# Relative to wherever `ros2 run` is launched from (i.e. ros2_ws/)
+OUTPUT_DIR = 'src/outputs'
 
 
 class TeensyInterfaceNode(Node):
@@ -27,7 +31,7 @@ class TeensyInterfaceNode(Node):
         self.serial_conn = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
         self._seq = 0
 
-        # For the reference-vs-measured plot
+        # For the reference-vs-measured CSV export
         self.start_time = self.get_clock().now()
         self.cmd_time = []
         self.cmd_left = []
@@ -85,15 +89,18 @@ class TeensyInterfaceNode(Node):
     def elapsed_seconds(self):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
 
-    def plot(self):
-        plt.plot(self.cmd_time, self.cmd_left, label='reference left')
-        plt.plot(self.meas_time, self.meas_left, label='measured left')
-        plt.plot(self.cmd_time, self.cmd_right, label='reference right')
-        plt.plot(self.meas_time, self.meas_right, label='measured right')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Wheel speed (rad/s)')
-        plt.legend()
-        plt.show()
+    def save_csv(self):
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        with open(os.path.join(OUTPUT_DIR, 'wheel_speed_cmd.csv'), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['time_s', 'left', 'right'])
+            writer.writerows(zip(self.cmd_time, self.cmd_left, self.cmd_right))
+
+        with open(os.path.join(OUTPUT_DIR, 'wheel_speed_meas.csv'), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['time_s', 'left', 'right'])
+            writer.writerows(zip(self.meas_time, self.meas_left, self.meas_right))
 
 
 def main(args=None):
@@ -104,7 +111,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.plot()
+        node.save_csv()
         node.destroy_node()
         rclpy.shutdown()
 
