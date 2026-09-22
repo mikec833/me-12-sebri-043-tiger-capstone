@@ -81,19 +81,29 @@ class TeensyInterfaceNode(Node):
                 self.get_logger().info(f'Teensy: {line}')
                 continue
 
-            _, left_rads, right_rads = line.split(',')
+            parts = line.split(',')
+            if len(parts) != 3:
+                self.get_logger().warn(f'Malformed line, skipping: {line}')
+                continue
+
+            try:
+                left = float(parts[1])
+                right = float(parts[2])
+            except ValueError:
+                self.get_logger().warn(f'Malformed line, skipping: {line}')
+                continue
 
             speed_msg = LeftRightFloat32()
-            speed_msg.left = float(left_rads)
-            speed_msg.right = float(right_rads)
+            speed_msg.left = left
+            speed_msg.right = right
             speed_msg.seq_num = self._seq
             self.speed_pub.publish(speed_msg)
 
             self.log_time.append(self.elapsed_seconds())
             self.log_ref_left.append(self.ref_left)
             self.log_ref_right.append(self.ref_right)
-            self.log_meas_left.append(speed_msg.left)
-            self.log_meas_right.append(speed_msg.right)
+            self.log_meas_left.append(left)
+            self.log_meas_right.append(right)
 
             self._seq += 1
 
