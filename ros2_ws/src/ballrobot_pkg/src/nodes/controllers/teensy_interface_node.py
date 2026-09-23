@@ -21,7 +21,7 @@ DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
 # Relative to wherever `ros2 run` is launched from (i.e. ros2_ws/)
-OUTPUT_DIR = 'src/outputs'
+OUTPUT_DIR = 'src/outputs/wheel_outputs'
 
 
 class TeensyInterfaceNode(Node):

@@ -36,6 +36,9 @@ Parameters (dynamic)
         relying on a non-zero value.
 """
 
+import csv
+import glob
+import os
 import threading
 import time
 import traceback
@@ -49,6 +52,9 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 from uwb_position_reader import UWBPositionReader
+
+# Relative to wherever `ros2 run`/`ros2 launch` is launched from (i.e. ros2_ws/)
+OUTPUT_DIR = 'src/outputs/uwb_outputs'
 
 
 class UwbNode(Node):
@@ -86,6 +92,14 @@ class UwbNode(Node):
         self._pub_position = self.create_publisher(
             PointStamped, "uwb/position", qos_profile_sensor_data
         )
+
+        # For the CSV export: one row per published position
+        self.start_time = self.get_clock().now()
+        self.log_time = []
+        self.log_x = []
+        self.log_y = []
+        self.log_z = []
+        self.log_clamped = []
 
         # The serial read blocks, so it runs in its own thread instead of
         # an executor callback. rclpy publishers are safe to call from
@@ -169,6 +183,15 @@ class UwbNode(Node):
         msg.point.z = float(position[2])
         self._pub_position.publish(msg)
 
+        self.log_time.append(self.elapsed_seconds())
+        self.log_x.append(msg.point.x)
+        self.log_y.append(msg.point.y)
+        self.log_z.append(msg.point.z)
+        self.log_clamped.append(result["clamped"])
+
+    def elapsed_seconds(self) -> float:
+        return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+
     # ---- lifecycle ---------------------------------------------------------
 
     def _safe_disconnect(self) -> None:
@@ -177,10 +200,32 @@ class UwbNode(Node):
         except Exception:
             pass
 
+    def next_run_number(self) -> int:
+        existing = glob.glob(os.path.join(OUTPUT_DIR, 'uwb_log_run*.csv'))
+        run_numbers = [0]
+        for path in existing:
+            digits = os.path.basename(path)[len('uwb_log_run'):-len('.csv')]
+            if digits.isdigit():
+                run_numbers.append(int(digits))
+        return max(run_numbers) + 1
+
+    def save_csv(self) -> None:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        filename = f'uwb_log_run{self.next_run_number()}.csv'
+
+        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['time_s', 'x', 'y', 'z', 'clamped'])
+            writer.writerows(zip(
+                self.log_time, self.log_x, self.log_y, self.log_z, self.log_clamped))
+
+        self.get_logger().info(f'Saved {filename}')
+
     def destroy_node(self) -> None:
         self._stop_event.set()
         self._thread.join(timeout=self._serial_timeout_s + 1.0)
         self._safe_disconnect()
+        self.save_csv()
         super().destroy_node()
 
 

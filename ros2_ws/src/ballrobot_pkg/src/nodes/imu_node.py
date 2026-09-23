@@ -52,6 +52,9 @@ Parameters (dynamic)
         the stamp. Leave at 0.0 until measured.
 """
 
+import csv
+import glob
+import os
 import struct
 import threading
 import time
@@ -67,6 +70,9 @@ from rclpy.qos import qos_profile_sensor_data
 
 FRAME_LEN = 19
 SYNC = b"\xAA\xAA"
+
+# Relative to wherever `ros2 run`/`ros2 launch` is launched from (i.e. ros2_ws/)
+OUTPUT_DIR = 'src/outputs/imu_outputs'
 
 
 class ImuNode(Node):
@@ -94,6 +100,16 @@ class ImuNode(Node):
         self._pub_imu = self.create_publisher(
             ImuRvc, "imu/data", qos_profile_sensor_data
         )
+
+        # For the CSV export: one row per published frame
+        self.start_time = self.get_clock().now()
+        self.log_time = []
+        self.log_yaw = []
+        self.log_pitch = []
+        self.log_roll = []
+        self.log_accel_x = []
+        self.log_accel_y = []
+        self.log_accel_z = []
 
         # Blocking serial reads, so this runs in its own thread rather
         # than an executor callback, same as uwb_node.py.
@@ -192,12 +208,46 @@ class ImuNode(Node):
         msg.accel_z = float(accel_z_raw)
         self._pub_imu.publish(msg)
 
+        self.log_time.append(self.elapsed_seconds())
+        self.log_yaw.append(msg.yaw)
+        self.log_pitch.append(msg.pitch)
+        self.log_roll.append(msg.roll)
+        self.log_accel_x.append(msg.accel_x)
+        self.log_accel_y.append(msg.accel_y)
+        self.log_accel_z.append(msg.accel_z)
+
+    def elapsed_seconds(self) -> float:
+        return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+
     # ---- lifecycle -----------------------------------------------------------
+
+    def next_run_number(self) -> int:
+        existing = glob.glob(os.path.join(OUTPUT_DIR, 'imu_log_run*.csv'))
+        run_numbers = [0]
+        for path in existing:
+            digits = os.path.basename(path)[len('imu_log_run'):-len('.csv')]
+            if digits.isdigit():
+                run_numbers.append(int(digits))
+        return max(run_numbers) + 1
+
+    def save_csv(self) -> None:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        filename = f'imu_log_run{self.next_run_number()}.csv'
+
+        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['time_s', 'yaw', 'pitch', 'roll', 'accel_x', 'accel_y', 'accel_z'])
+            writer.writerows(zip(
+                self.log_time, self.log_yaw, self.log_pitch, self.log_roll,
+                self.log_accel_x, self.log_accel_y, self.log_accel_z))
+
+        self.get_logger().info(f'Saved {filename}')
 
     def destroy_node(self) -> None:
         self._stop_event.set()
         self._thread.join(timeout=1.0)
         self._safe_disconnect()
+        self.save_csv()
         super().destroy_node()
 
 
