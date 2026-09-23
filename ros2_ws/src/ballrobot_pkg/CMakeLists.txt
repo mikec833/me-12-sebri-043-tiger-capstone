@@ -22,6 +22,7 @@ install(PROGRAMS
   src/nodes/uwb_node.py
   src/nodes/imu_node.py
   src/nodes/controllers/teensy_interface_node.py
+  src/nodes/controllers/cmd_vel_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
