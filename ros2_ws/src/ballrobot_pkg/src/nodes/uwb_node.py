@@ -63,7 +63,7 @@ class UwbNode(Node):
         self.declare_parameter("anchor_ids", [1, 2, 3], read_only)
         self.declare_parameter(
             "anchor_positions",
-            [0.0, 0.0, 0.60, 10.0, 0.0, 0.630, 0.0, 15.0, 0.610],
+            [0.0, 0.0, 1.3, 1.8, 0.0, 1.3, 0.0, 1.8, 1.3],
             read_only,
         )
         self.declare_parameter("tag_below_anchor_plane", True, read_only)
