@@ -16,7 +16,7 @@ bno085_rvc.py itself is unmodified; run it standalone if you want the
 plain non-ROS smoke test it already provides.
 
 Published topics
-    imu/data    ballrobot_bridge/ImuRvc
+    imu/data    ballrobot_pkg/ImuRvc
         One message per valid frame, carrying yaw/pitch/roll (deg) and
         accel_x/y/z (raw signed 16-bit counts, UNCONVERTED) together,
         since they're decoded from the same 19-byte frame. The source
@@ -58,7 +58,7 @@ import traceback
 
 import rclpy
 import serial
-from ballrobot_bridge.msg import ImuRvc
+from ballrobot_pkg.msg import ImuRvc
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.duration import Duration
 from rclpy.node import Node

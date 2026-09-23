@@ -17,7 +17,7 @@ import glob
 
 from ballrobot_pkg.msg import LeftRightFloat32
 
-SERIAL_PORT = '/dev/ttyACM0'
+DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
 # Relative to wherever `ros2 run` is launched from (i.e. ros2_ws/)
@@ -29,7 +29,10 @@ class TeensyInterfaceNode(Node):
     def __init__(self):
         super().__init__('teensy_interface_node')
 
-        self.serial_conn = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+        self.declare_parameter('serial_port', DEFAULT_SERIAL_PORT)
+        serial_port = self.get_parameter('serial_port').value
+
+        self.serial_conn = serial.Serial(serial_port, BAUD_RATE, timeout=0)
         self._seq = 0
 
         # For the reference-vs-measured CSV export: one row per measurement,
@@ -68,7 +71,7 @@ class TeensyInterfaceNode(Node):
         # Poll instead of blocking-read so callbacks still get serviced
         self.create_timer(0.02, self.poll_serial)  # 50 Hz
 
-        self.get_logger().info(f'Connected to {SERIAL_PORT}, node up and spinning.')
+        self.get_logger().info(f'Connected to {serial_port}, node up and spinning.')
 
     def on_cmd(self, msg): # encodes two floats and writes to serial port
         line = f"REF,{msg.left:.3f},{msg.right:.3f}\n"

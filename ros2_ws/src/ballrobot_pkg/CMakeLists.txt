@@ -10,7 +10,6 @@ find_package(rosidl_default_generators REQUIRED)
 
 # Custom messages
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/YourMessage.msg"
   "msg/ImuRvc.msg"
   "msg/LeftRightFloat32.msg"
   "msg/LeftRightInt32.msg"
@@ -33,6 +32,12 @@ install(FILES
   src/nodes/uwb_position_reader.py
   src/nodes/uwb_trilateration.py
   DESTINATION lib/${PROJECT_NAME}
+)
+
+# Launch files
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_package()
