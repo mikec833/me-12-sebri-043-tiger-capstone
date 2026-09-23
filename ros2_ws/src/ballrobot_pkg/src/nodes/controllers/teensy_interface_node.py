@@ -50,6 +50,12 @@ class TeensyInterfaceNode(Node):
         #     10 - QoS setting - mostly 10
         # )
         
+        # self.publisher = self.create_publisher(
+        #     MessageType,
+        #     'topic_name',
+        #     10
+        # )
+                
         # SUBSCRIBERS
         # Pi -> Teensy: wheel speed theta_l/r_dot_ref (rad/s)
         self.cmd_sub = self.create_subscription(
