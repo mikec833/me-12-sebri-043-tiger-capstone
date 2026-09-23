@@ -9,5 +9,5 @@ if [[ ! -d "$WS_DIR/src" ]]; then
     exit 1
 fi
 
-rm -rf -- "$WS_DIR/build" "$WS_DIR/log"
-echo "Deleted $WS_DIR/build and $WS_DIR/log"
+rm -rf -- "$WS_DIR/build" "$WS_DIR/log" "$WS_DIR/install"
+echo "Deleted $WS_DIR/build, $WS_DIR/log and $WS_DIR/install"
