@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# Pi <-> Teensy serial bridge. 
-# To add:
-# reconnect handling, parameters, error recovery.
+# Pi <-> Teensy serial bridge.
 #
 # Wire protocol (newline-terminated ASCII lines):
 #   Pi -> Teensy:  "REF,<left_rad_s>,<right_rad_s>\n"
 #   Teensy -> Pi:  "MEAS,<left_rad_s>,<right_rad_s>\n"
 
+
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -19,6 +19,7 @@ from ballrobot_pkg.msg import LeftRightFloat32
 
 DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
+RECONNECT_PERIOD_S = 2.0
 
 # Relative to wherever `ros2 run` is launched from (i.e. ros2_ws/)
 OUTPUT_DIR = 'src/outputs/wheel_outputs'
@@ -30,9 +31,12 @@ class TeensyInterfaceNode(Node):
         super().__init__('teensy_interface_node')
 
         self.declare_parameter('serial_port', DEFAULT_SERIAL_PORT)
-        serial_port = self.get_parameter('serial_port').value
+        self._serial_port = self.get_parameter('serial_port').value
 
-        self.serial_conn = serial.Serial(serial_port, BAUD_RATE, timeout=0)
+        self.serial_conn = None
+        self._last_connect_attempt = 0.0
+        self._connect()
+
         self._seq = 0
 
         # For the reference-vs-measured CSV export: one row per measurement,
@@ -71,19 +75,60 @@ class TeensyInterfaceNode(Node):
         # Poll instead of blocking-read so callbacks still get serviced
         self.create_timer(0.02, self.poll_serial)  # 50 Hz
 
-        self.get_logger().info(f'Connected to {serial_port}, node up and spinning.')
+    def _connect(self):
+        if self.serial_conn is not None:
+            return
+        self._last_connect_attempt = time.monotonic()
+        try:
+            self.serial_conn = serial.Serial(self._serial_port, BAUD_RATE, timeout=0)
+            self.get_logger().info(f'Connected to {self._serial_port}, node up and spinning.')
+        except serial.SerialException as exc:
+            self.get_logger().warn(
+                f'Teensy link fault ({exc}), reconnecting in {RECONNECT_PERIOD_S:.1f} s',
+                throttle_duration_sec=5.0)
+            self.serial_conn = None
+
+    def _disconnect(self):
+        try:
+            if self.serial_conn is not None:
+                self.serial_conn.close()
+        except Exception:
+            pass
+        self.serial_conn = None
+
+    def _ensure_connected(self):
+        if self.serial_conn is not None:
+            return True
+        if time.monotonic() - self._last_connect_attempt < RECONNECT_PERIOD_S:
+            return False
+        self._connect()
+        return self.serial_conn is not None
 
     def on_cmd(self, msg): # encodes two floats and writes to serial port
+        if not self._ensure_connected():
+            return
+
         line = f"REF,{msg.left:.3f},{msg.right:.3f}\n"
-        self.serial_conn.write(line.encode('ascii'))
+        try:
+            self.serial_conn.write(line.encode('ascii'))
+        except serial.SerialException:
+            self._disconnect()
+            return
         self.get_logger().info(f'Sent {line.strip()}')
 
         self.ref_left = msg.left
         self.ref_right = msg.right
 
     def poll_serial(self): # drains every line currently buffered, not just one
+        if not self._ensure_connected():
+            return
+
         while True:
-            line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
+            try:
+                line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
+            except serial.SerialException:
+                self._disconnect()
+                return
             if not line:
                 break
             if not line.startswith('MEAS'):

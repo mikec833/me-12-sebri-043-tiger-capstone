@@ -9,7 +9,7 @@ from ballrobot_pkg.msg import LeftRightFloat32
 
 DEFAULT_WHEEL_RADIUS_M = 0.072
 DEFAULT_WHEEL_BASE_M = 0.22
-DEFAULT_MAX_WHEEL_SPEED_RAD_S = 8.0  # identified max is ~13 rad/s; stay under it for PI headroom
+DEFAULT_MAX_WHEEL_SPEED_RAD_S = 5.0  # identified max is ~13 rad/s; stay under it for PI headroom
 
 
 class CmdVelBridge(Node):
