@@ -10,9 +10,9 @@ constexpr int ENC_L_B = 21;   // left  yellow
 constexpr int ENC_R_A = 20;   // right white
 constexpr int ENC_R_B = 19;   // right yellow
 constexpr int8_t LEFT_POLARITY  = 1;
-constexpr int8_t RIGHT_POLARITY = -1;
+constexpr int8_t RIGHT_POLARITY = 1;
 constexpr int8_t ENC_L_POLARITY = 1;
-constexpr int8_t ENC_R_POLARITY = 1;
+constexpr int8_t ENC_R_POLARITY = -1;
 constexpr float COUNTS_PER_WHEEL_REV = 64.0f * 70.0f;
 
 constexpr int NEUTRAL_PULSE_US = 1500;
