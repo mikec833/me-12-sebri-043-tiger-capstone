@@ -6,6 +6,7 @@
 #   Teensy -> Pi:  "MEAS,<left_rad_s>,<right_rad_s>\n"
 
 
+import sys
 import time
 
 import rclpy
@@ -13,6 +14,18 @@ from rclpy.node import Node
 import serial
 import csv
 import os
+
+# run_logging.py is installed as a flat sibling of this script (see
+# CMakeLists.txt), but this source file itself lives one directory
+# down (src/nodes/controllers/, not src/nodes/). With
+# `colcon build --symlink-install`, the installed copy is a symlink
+# back to this source file, and Python's default sys.path[0] follows
+# that symlink to its real (source-tree) directory rather than the
+# flat install directory -- so the bare `import run_logging` below
+# would only resolve by accident. Adding the script's own invoked
+# location (sys.argv[0], not its symlink target) makes it resolve
+# deterministically regardless of interpreter/OS symlink behavior.
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from ballrobot_pkg.msg import LeftRightFloat32
 from run_logging import resolve_run_id

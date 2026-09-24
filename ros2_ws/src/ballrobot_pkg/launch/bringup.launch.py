@@ -5,6 +5,7 @@ from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -45,6 +46,17 @@ def generate_launch_description():
         'run_id', default_value=datetime.now().strftime('%Y%m%d_%H%M%S'),
         description='Shared CSV run identifier for every node this launch starts')
 
+    # A purely-numeric run_id (default is a timestamp) gets silently
+    # coerced to an integer when passed through a launch parameters
+    # dict: the params file that's actually handed to each node is YAML,
+    # and YAML 1.1's int grammar treats underscores as digit separators
+    # (like Python's 1_000_000), so e.g. "20260924_190925" parses as the
+    # int 20260924190925 -- which then fails declare_parameter("run_id",
+    # "", ...) since the declared default type is str. Wrapping in
+    # ParameterValue(..., value_type=str) forces it to stay a string
+    # regardless of what it looks like.
+    run_id_param = ParameterValue(LaunchConfiguration('run_id'), value_type=str)
+
     teensy_interface_node = Node(
         package='ballrobot_pkg',
         executable='teensy_interface_node.py',
@@ -52,7 +64,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'serial_port': LaunchConfiguration('teensy_port'),
-            'run_id': LaunchConfiguration('run_id'),
+            'run_id': run_id_param,
         }],
     )
 
@@ -63,7 +75,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'serial_port': LaunchConfiguration('uwb_port'),
-            'run_id': LaunchConfiguration('run_id'),
+            'run_id': run_id_param,
         }],
     )
 
@@ -74,7 +86,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'serial_port': LaunchConfiguration('imu_port'),
-            'run_id': LaunchConfiguration('run_id'),
+            'run_id': run_id_param,
         }],
     )
 
@@ -83,7 +95,7 @@ def generate_launch_description():
         executable='cmd_vel_bridge.py',
         name='cmd_vel_bridge',
         output='screen',
-        parameters=[{'run_id': LaunchConfiguration('run_id')}],
+        parameters=[{'run_id': run_id_param}],
     )
 
     imu_quaternion_node = Node(
@@ -91,7 +103,7 @@ def generate_launch_description():
         executable='imu_quaternion_node.py',
         name='imu_quaternion_node',
         output='screen',
-        parameters=[{'run_id': LaunchConfiguration('run_id')}],
+        parameters=[{'run_id': run_id_param}],
         condition=IfCondition(LaunchConfiguration('enable_imu_quat')),
     )
 
