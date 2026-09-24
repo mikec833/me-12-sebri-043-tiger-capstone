@@ -65,7 +65,7 @@ class UwbNode(Node):
         super().__init__("uwb_node")
 
         read_only = ParameterDescriptor(read_only=True)
-        self.declare_parameter("serial_port", "/dev/ttyACM0", read_only)
+        self.declare_parameter("serial_port", "/dev/ttyACM1", read_only)
         self.declare_parameter("baud_rate", 115200, read_only)
         self.declare_parameter("serial_timeout_s", 1.0, read_only)
         self.declare_parameter("reconnect_period_s", 2.0, read_only)
