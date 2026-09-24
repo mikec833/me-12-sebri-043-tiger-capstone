@@ -24,6 +24,7 @@ install(PROGRAMS
   src/nodes/imu_quaternion_node.py
   src/nodes/controllers/teensy_interface_node.py
   src/nodes/controllers/cmd_vel_bridge.py
+  src/nodes/controllers/wasd_teleop.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
