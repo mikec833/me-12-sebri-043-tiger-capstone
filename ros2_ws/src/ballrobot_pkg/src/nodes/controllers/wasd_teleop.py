@@ -79,7 +79,7 @@ class WasdTeleop(Node):
     def __init__(self) -> None:
         super().__init__('wasd_teleop')
 
-        self.declare_parameter('linear_speed_m_s', 0.15)
+        self.declare_parameter('linear_speed_m_s', 0.40)
         self.declare_parameter('angular_speed_rad_s', 1.0)
         self.linear_speed = float(self.get_parameter('linear_speed_m_s').value)
         self.angular_speed = float(self.get_parameter('angular_speed_rad_s').value)
