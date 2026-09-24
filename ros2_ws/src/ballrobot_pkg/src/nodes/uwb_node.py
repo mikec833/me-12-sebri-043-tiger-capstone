@@ -26,6 +26,9 @@ Parameters (read only, set at startup)
     anchor_ids               int[3]       [1, 2, 3]
     anchor_positions         float[9]     x1,y1,z1,x2,y2,z2,x3,y3,z3 (m)
     tag_below_anchor_plane   bool         True
+    run_id                   str          ""
+        CSV run identifier; shared across nodes in the same bringup.
+        See run_logging.py.
 
 Parameters (dynamic)
     frame_id                 str          "map"
@@ -37,7 +40,6 @@ Parameters (dynamic)
 """
 
 import csv
-import glob
 import os
 import threading
 import time
@@ -51,6 +53,7 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from run_logging import resolve_run_id, stamp_to_seconds
 from uwb_position_reader import UWBPositionReader
 
 # Relative to wherever `ros2 run`/`ros2 launch` is launched from (i.e. ros2_ws/)
@@ -73,6 +76,7 @@ class UwbNode(Node):
             read_only,
         )
         self.declare_parameter("tag_below_anchor_plane", True, read_only)
+        self.declare_parameter("run_id", "", read_only)
 
         self.declare_parameter("frame_id", "map")
         self.declare_parameter("latency_compensation_s", 0.0)
@@ -96,6 +100,7 @@ class UwbNode(Node):
         # For the CSV export: one row per published position
         self.start_time = self.get_clock().now()
         self.log_time = []
+        self.log_stamp_s = []
         self.log_x = []
         self.log_y = []
         self.log_z = []
@@ -184,6 +189,7 @@ class UwbNode(Node):
         self._pub_position.publish(msg)
 
         self.log_time.append(self.elapsed_seconds())
+        self.log_stamp_s.append(stamp_to_seconds(stamp))
         self.log_x.append(msg.point.x)
         self.log_y.append(msg.point.y)
         self.log_z.append(msg.point.z)
@@ -200,24 +206,17 @@ class UwbNode(Node):
         except Exception:
             pass
 
-    def next_run_number(self) -> int:
-        existing = glob.glob(os.path.join(OUTPUT_DIR, 'uwb_log_run*.csv'))
-        run_numbers = [0]
-        for path in existing:
-            digits = os.path.basename(path)[len('uwb_log_run'):-len('.csv')]
-            if digits.isdigit():
-                run_numbers.append(int(digits))
-        return max(run_numbers) + 1
-
     def save_csv(self) -> None:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        filename = f'uwb_log_run{self.next_run_number()}.csv'
+        run_id = resolve_run_id(OUTPUT_DIR, 'uwb_log_run', self.get_parameter('run_id').value)
+        filename = f'uwb_log_run{run_id}.csv'
 
         with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['time_s', 'x', 'y', 'z', 'clamped'])
+            writer.writerow(['time_s', 'stamp_s', 'x', 'y', 'z', 'clamped'])
             writer.writerows(zip(
-                self.log_time, self.log_x, self.log_y, self.log_z, self.log_clamped))
+                self.log_time, self.log_stamp_s, self.log_x, self.log_y, self.log_z,
+                self.log_clamped))
 
         self.get_logger().info(f'Saved {filename}')
 

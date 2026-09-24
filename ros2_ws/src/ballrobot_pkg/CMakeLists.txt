@@ -21,6 +21,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 install(PROGRAMS
   src/nodes/uwb_node.py
   src/nodes/imu_node.py
+  src/nodes/imu_quaternion_node.py
   src/nodes/controllers/teensy_interface_node.py
   src/nodes/controllers/cmd_vel_bridge.py
   DESTINATION lib/${PROJECT_NAME}
@@ -32,6 +33,7 @@ install(PROGRAMS
 install(FILES
   src/nodes/uwb_position_reader.py
   src/nodes/uwb_trilateration.py
+  src/nodes/run_logging.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

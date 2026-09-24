@@ -43,6 +43,9 @@ Parameters (read only, set at startup)
     baud_rate                int     115200
     serial_read_chunk        int     64      (bytes per ser.read() call)
     reconnect_period_s       float   2.0
+    run_id                    str     ""
+        CSV run identifier; shared across nodes in the same bringup.
+        See run_logging.py.
 
 Parameters (dynamic)
     frame_id                  str     "imu_link"
@@ -53,7 +56,6 @@ Parameters (dynamic)
 """
 
 import csv
-import glob
 import os
 import struct
 import threading
@@ -67,6 +69,8 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+
+from run_logging import resolve_run_id, stamp_to_seconds
 
 FRAME_LEN = 19
 SYNC = b"\xAA\xAA"
@@ -84,6 +88,7 @@ class ImuNode(Node):
         self.declare_parameter("baud_rate", 115200, read_only)
         self.declare_parameter("serial_read_chunk", 64, read_only)
         self.declare_parameter("reconnect_period_s", 2.0, read_only)
+        self.declare_parameter("run_id", "", read_only)
 
         self.declare_parameter("frame_id", "imu_link")
         self.declare_parameter("latency_compensation_s", 0.0)
@@ -104,6 +109,7 @@ class ImuNode(Node):
         # For the CSV export: one row per published frame
         self.start_time = self.get_clock().now()
         self.log_time = []
+        self.log_stamp_s = []
         self.log_yaw = []
         self.log_pitch = []
         self.log_roll = []
@@ -209,6 +215,7 @@ class ImuNode(Node):
         self._pub_imu.publish(msg)
 
         self.log_time.append(self.elapsed_seconds())
+        self.log_stamp_s.append(stamp_to_seconds(stamp))
         self.log_yaw.append(msg.yaw)
         self.log_pitch.append(msg.pitch)
         self.log_roll.append(msg.roll)
@@ -221,24 +228,18 @@ class ImuNode(Node):
 
     # ---- lifecycle -----------------------------------------------------------
 
-    def next_run_number(self) -> int:
-        existing = glob.glob(os.path.join(OUTPUT_DIR, 'imu_log_run*.csv'))
-        run_numbers = [0]
-        for path in existing:
-            digits = os.path.basename(path)[len('imu_log_run'):-len('.csv')]
-            if digits.isdigit():
-                run_numbers.append(int(digits))
-        return max(run_numbers) + 1
-
     def save_csv(self) -> None:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        filename = f'imu_log_run{self.next_run_number()}.csv'
+        run_id = resolve_run_id(OUTPUT_DIR, 'imu_log_run', self.get_parameter('run_id').value)
+        filename = f'imu_log_run{run_id}.csv'
 
         with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['time_s', 'yaw', 'pitch', 'roll', 'accel_x', 'accel_y', 'accel_z'])
+            writer.writerow(
+                ['time_s', 'stamp_s', 'yaw', 'pitch', 'roll', 'accel_x', 'accel_y', 'accel_z']
+            )
             writer.writerows(zip(
-                self.log_time, self.log_yaw, self.log_pitch, self.log_roll,
+                self.log_time, self.log_stamp_s, self.log_yaw, self.log_pitch, self.log_roll,
                 self.log_accel_x, self.log_accel_y, self.log_accel_z))
 
         self.get_logger().info(f'Saved {filename}')

@@ -13,9 +13,9 @@ from rclpy.node import Node
 import serial
 import csv
 import os
-import glob
 
 from ballrobot_pkg.msg import LeftRightFloat32
+from run_logging import resolve_run_id
 
 DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
@@ -32,6 +32,8 @@ class TeensyInterfaceNode(Node):
 
         self.declare_parameter('serial_port', DEFAULT_SERIAL_PORT)
         self._serial_port = self.get_parameter('serial_port').value
+        # Shared across nodes in the same bringup; see run_logging.py.
+        self.declare_parameter('run_id', '')
 
         self.serial_conn = None
         self._last_connect_attempt = 0.0
@@ -45,6 +47,7 @@ class TeensyInterfaceNode(Node):
         self.ref_left = 0.0
         self.ref_right = 0.0
         self.log_time = []
+        self.log_stamp_s = []
         self.log_ref_left = []
         self.log_ref_right = []
         self.log_meas_left = []
@@ -154,6 +157,7 @@ class TeensyInterfaceNode(Node):
             self.speed_pub.publish(speed_msg)
 
             self.log_time.append(self.elapsed_seconds())
+            self.log_stamp_s.append(self.get_clock().now().nanoseconds * 1e-9)
             self.log_ref_left.append(self.ref_left)
             self.log_ref_right.append(self.ref_right)
             self.log_meas_left.append(left)
@@ -164,24 +168,18 @@ class TeensyInterfaceNode(Node):
     def elapsed_seconds(self):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
 
-    def next_run_number(self):
-        existing = glob.glob(os.path.join(OUTPUT_DIR, 'wheel_speed_log_run*.csv'))
-        run_numbers = [0]
-        for path in existing:
-            digits = os.path.basename(path)[len('wheel_speed_log_run'):-len('.csv')]
-            if digits.isdigit():
-                run_numbers.append(int(digits))
-        return max(run_numbers) + 1
-
     def save_csv(self):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        filename = f'wheel_speed_log_run{self.next_run_number()}.csv'
+        run_id = resolve_run_id(OUTPUT_DIR, 'wheel_speed_log_run', self.get_parameter('run_id').value)
+        filename = f'wheel_speed_log_run{run_id}.csv'
 
         with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['time_s', 'ref_left', 'ref_right', 'meas_left', 'meas_right'])
+            writer.writerow(
+                ['time_s', 'stamp_s', 'ref_left', 'ref_right', 'meas_left', 'meas_right']
+            )
             writer.writerows(zip(
-                self.log_time, self.log_ref_left, self.log_ref_right,
+                self.log_time, self.log_stamp_s, self.log_ref_left, self.log_ref_right,
                 self.log_meas_left, self.log_meas_right))
 
         self.get_logger().info(f'Saved {filename}')
