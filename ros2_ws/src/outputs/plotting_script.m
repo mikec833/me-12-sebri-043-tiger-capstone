@@ -1,94 +1,98 @@
-baseFolder = "C:\Users\Michael's PC\OneDrive - The University of Melbourne\Uni\Master's\Sem 2 2026\Capstone\robot_test_24_09";
-runID = "20260924_191935";
-xVar = 'time_s';
-yVar = 'yaw';
+baseFolder = 'C:\Users\Michael''s PC\OneDrive - The University of Melbourne\Uni\Master''s\Sem 2 2026\Capstone\robot_test_24_09';
+runID = '20260924_191935';
 
-allFiles = dir(fullfile(baseFolder, '**', '*.csv'));
-allFiles = allFiles(~[allFiles.isdir]);
+runFolder = fullfile(baseFolder, ['run_' runID]);
+runFolder = char(runFolder);
 
-matchedFiles = {};
-for i = 1:length(allFiles)
-    fileName = allFiles(i).name;
-    if contains(fileName, runID)
-        matchedFiles{end+1} = fullfile(allFiles(i).folder, fileName);
+if ~isfolder(runFolder)
+    error('Run folder not found: %s', runFolder);
+end
+
+files = dir(fullfile(runFolder, '*.csv'));
+files = files(~[files.isdir]);
+
+cmdFile = '';
+uwbFile = '';
+wheelFile = '';
+
+for i = 1:length(files)
+    name = files(i).name;
+    if contains(name, 'cmd_vel')
+        cmdFile = fullfile(runFolder, name);
+    elseif contains(name, 'uwb')
+        uwbFile = fullfile(runFolder, name);
+    elseif contains(name, 'wheel')
+        wheelFile = fullfile(runFolder, name);
     end
 end
 
-fprintf('Matched %d files for run %s\n', length(matchedFiles), runID);
-for i = 1:length(matchedFiles)
-    T = readtable(matchedFiles{i});
-    fprintf('%s\n  rows = %d\n  vars = %s\n', ...
-        matchedFiles{i}, ...
-        height(T), ...
-        strjoin(T.Properties.VariableNames, ', '));
-end
+figure('Color', 'w');
 
-% Convert full paths to folder paths one at a time
-folderPaths = cellfun(@fileparts, matchedFiles, 'UniformOutput', false);
-sensorFolders = unique(folderPaths);
-
-figure('Color','w');
-
-plotCount = 0;
-for f = 1:length(sensorFolders)
-    folderPath = sensorFolders{f};
-    filesInFolder = dir(fullfile(folderPath, '*.csv'));
-
-    hasPlotData = false;
-
-    for i = 1:length(filesInFolder)
-        fileName = filesInFolder(i).name;
-        if ~contains(fileName, runID)
-            continue;
-        end
-
-        filePath = fullfile(filesInFolder(i).folder, fileName);
-        T = readtable(filePath);
-
-        if isempty(T) || height(T) == 0
-            continue;
-        end
-
-        if ismember(xVar, T.Properties.VariableNames) && ismember(yVar, T.Properties.VariableNames)
-            hasPlotData = true;
-            break;
-        end
-    end
-
-    if ~hasPlotData
-        continue;
-    end
-
-    plotCount = plotCount + 1;
-    subplot(1, plotCount, plotCount);
+% ---- cmd_vel subplot ----
+if ~isempty(cmdFile)
+    Tcmd = readtable(cmdFile);
+    subplot(3,1,1);
     hold on; grid on;
 
-    for i = 1:length(filesInFolder)
-        fileName = filesInFolder(i).name;
-        if ~contains(fileName, runID)
-            continue;
-        end
-
-        filePath = fullfile(filesInFolder(i).folder, fileName);
-        T = readtable(filePath);
-
-        if isempty(T) || height(T) == 0
-            continue;
-        end
-
-        if ismember(xVar, T.Properties.VariableNames) && ismember(yVar, T.Properties.VariableNames)
-            plot(T.(xVar), T.(yVar), 'LineWidth', 1.5, 'DisplayName', fileName);
-        end
+    if ismember('linear_x', Tcmd.Properties.VariableNames)
+        plot(Tcmd.time_s, Tcmd.linear_x, 'b', 'LineWidth', 1.5);
+    end
+    if ismember('angular_z', Tcmd.Properties.VariableNames)
+        plot(Tcmd.time_s, Tcmd.angular_z, 'r', 'LineWidth', 1.5);
     end
 
-    folderTitle = strrep(folderPath, baseFolder, '');
-    title(folderTitle, 'Interpreter', 'none');
-    xlabel(xVar);
-    ylabel(yVar);
+    xlabel('time_s', 'Interpreter', 'none');
+    ylabel('command', 'Interpreter', 'none');
+    title('cmd_vel log', 'Interpreter', 'none');
+    legend({'linear_x','angular_z'}, 'Interpreter', 'none', 'Location', 'best');
+    ylim([-2 2]);
 end
 
-if plotCount == 0
-    warning('No valid run data found for %s', runID);
-else
-    legend('show', 'Location', 'bestoutside');
+% ---- wheel speed subplot ----
+if ~isempty(wheelFile)
+    Twheel = readtable(wheelFile);
+    subplot(3,1,2);
+    hold on; grid on;
+
+    if ismember('ref_left', Twheel.Properties.VariableNames)
+        plot(Twheel.time_s, Twheel.ref_left, 'b--', 'LineWidth', 1.5);
+    end
+    if ismember('ref_right', Twheel.Properties.VariableNames)
+        plot(Twheel.time_s, Twheel.ref_right, 'r--', 'LineWidth', 1.5);
+    end
+    if ismember('meas_left', Twheel.Properties.VariableNames)
+        plot(Twheel.time_s, Twheel.meas_left, 'b', 'LineWidth', 1.5);
+    end
+    if ismember('meas_right', Twheel.Properties.VariableNames)
+        plot(Twheel.time_s, Twheel.meas_right, 'r', 'LineWidth', 1.5);
+    end
+
+    xlabel('time_s', 'Interpreter', 'none');
+    ylabel('wheel speed (rad/s)', 'Interpreter', 'none');
+    title('wheel_speed log', 'Interpreter', 'none');
+    legend({'ref_left','ref_right','meas_left','meas_right'}, ...
+           'Interpreter', 'none', 'Location', 'best');
+    ylim([-8 8]);
+end
+
+% ---- UWB subplot ----
+if ~isempty(uwbFile)
+    Tuwb = readtable(uwbFile);
+    subplot(3,1,3);
+    hold on; grid on;
+
+    if ismember('x', Tuwb.Properties.VariableNames)
+        plot(Tuwb.time_s, Tuwb.x, 'k', 'LineWidth', 1.5);
+    end
+    if ismember('y', Tuwb.Properties.VariableNames)
+        plot(Tuwb.time_s, Tuwb.y, 'b', 'LineWidth', 1.5);
+    end
+    if ismember('z', Tuwb.Properties.VariableNames)
+        plot(Tuwb.time_s, Tuwb.z, 'r', 'LineWidth', 1.5);
+    end
+
+    xlabel('time_s', 'Interpreter', 'none');
+    ylabel('position (m)', 'Interpreter', 'none');
+    title('uwb log', 'Interpreter', 'none');
+    legend({'x','y','z'}, 'Interpreter', 'none', 'Location', 'best');
 end
