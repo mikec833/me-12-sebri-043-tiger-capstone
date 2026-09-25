@@ -70,7 +70,7 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from run_logging import resolve_run_id, stamp_to_seconds
+from run_logging import resolve_run_output_dir, stamp_to_seconds
 
 FRAME_LEN = 19
 SYNC = b"\xAA\xAA"
@@ -229,11 +229,13 @@ class ImuNode(Node):
     # ---- lifecycle -----------------------------------------------------------
 
     def save_csv(self) -> None:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        run_id = resolve_run_id(OUTPUT_DIR, 'imu_log_run', self.get_parameter('run_id').value)
+        run_id = (self.get_parameter('run_id').value or '').strip()
+        if not run_id:
+            run_id = time.strftime('%Y%m%d_%H%M%S')
+        run_dir = resolve_run_output_dir(run_id)
         filename = f'imu_log_run{run_id}.csv'
 
-        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+        with open(os.path.join(run_dir, filename), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(
                 ['time_s', 'stamp_s', 'yaw', 'pitch', 'roll', 'accel_x', 'accel_y', 'accel_z']
@@ -242,7 +244,7 @@ class ImuNode(Node):
                 self.log_time, self.log_stamp_s, self.log_yaw, self.log_pitch, self.log_roll,
                 self.log_accel_x, self.log_accel_y, self.log_accel_z))
 
-        self.get_logger().info(f'Saved {filename}')
+        self.get_logger().info(f'Saved {filename} in {run_dir}')
 
     def destroy_node(self) -> None:
         self._stop_event.set()

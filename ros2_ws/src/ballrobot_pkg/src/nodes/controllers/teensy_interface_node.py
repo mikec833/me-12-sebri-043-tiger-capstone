@@ -28,7 +28,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from ballrobot_pkg.msg import LeftRightFloat32
-from run_logging import resolve_run_id
+from run_logging import resolve_run_output_dir
 
 DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 115200
@@ -182,11 +182,13 @@ class TeensyInterfaceNode(Node):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
 
     def save_csv(self):
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        run_id = resolve_run_id(OUTPUT_DIR, 'wheel_speed_log_run', self.get_parameter('run_id').value)
+        run_id = (self.get_parameter('run_id').value or '').strip()
+        if not run_id:
+            run_id = time.strftime('%Y%m%d_%H%M%S')
+        run_dir = resolve_run_output_dir(run_id)
         filename = f'wheel_speed_log_run{run_id}.csv'
 
-        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+        with open(os.path.join(run_dir, filename), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(
                 ['time_s', 'stamp_s', 'ref_left', 'ref_right', 'meas_left', 'meas_right']
@@ -195,7 +197,7 @@ class TeensyInterfaceNode(Node):
                 self.log_time, self.log_stamp_s, self.log_ref_left, self.log_ref_right,
                 self.log_meas_left, self.log_meas_right))
 
-        self.get_logger().info(f'Saved {filename}')
+        self.get_logger().info(f'Saved {filename} in {run_dir}')
 
 
 def main(args=None):

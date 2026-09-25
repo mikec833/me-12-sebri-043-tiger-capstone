@@ -25,6 +25,7 @@ every node you start by hand) if you need that.
 
 import glob
 import os
+import time
 
 
 def stamp_to_seconds(stamp) -> float:
@@ -51,3 +52,19 @@ def resolve_run_id(output_dir: str, filename_prefix: str, run_id_param: str) -> 
         if digits.isdigit():
             run_numbers.append(int(digits))
     return str(max(run_numbers) + 1)
+
+
+def resolve_run_output_dir(run_id_param: str) -> str:
+    """Return a run-specific output directory under src/outputs.
+
+    If a run_id is supplied, reuse it. Otherwise create a timestamp-based id.
+    This makes shutdown-time CSV exports land in one folder per run, e.g.
+    src/outputs/run_20260924_191935/imu_log_run20260924_191935.csv.
+    """
+    run_id = (run_id_param or "").strip()
+    if not run_id:
+        run_id = time.strftime('%Y%m%d_%H%M%S')
+
+    run_dir = os.path.join('src', 'outputs', f'run_{run_id}')
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir

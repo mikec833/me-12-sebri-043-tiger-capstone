@@ -39,7 +39,7 @@ from rclpy.node import Node
 sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from ballrobot_pkg.msg import LeftRightFloat32
-from run_logging import resolve_run_id
+from run_logging import resolve_run_output_dir
 
 DEFAULT_WHEEL_RADIUS_M = 0.072
 DEFAULT_WHEEL_BASE_M = 0.22
@@ -106,11 +106,13 @@ class CmdVelBridge(Node):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
 
     def save_csv(self):
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        run_id = resolve_run_id(OUTPUT_DIR, 'cmd_vel_log_run', self.get_parameter('run_id').value)
+        run_id = (self.get_parameter('run_id').value or '').strip()
+        if not run_id:
+            run_id = time.strftime('%Y%m%d_%H%M%S')
+        run_dir = resolve_run_output_dir(run_id)
         filename = f'cmd_vel_log_run{run_id}.csv'
 
-        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+        with open(os.path.join(run_dir, filename), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
                 'time_s', 'stamp_s', 'linear_x', 'angular_z',
@@ -122,7 +124,7 @@ class CmdVelBridge(Node):
                 self.log_left_unclamped, self.log_right_unclamped,
                 self.log_left, self.log_right))
 
-        self.get_logger().info(f'Saved {filename}')
+        self.get_logger().info(f'Saved {filename} in {run_dir}')
 
     def destroy_node(self):
         self.save_csv()

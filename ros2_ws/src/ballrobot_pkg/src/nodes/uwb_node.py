@@ -53,7 +53,7 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from run_logging import resolve_run_id, stamp_to_seconds
+from run_logging import resolve_run_output_dir, stamp_to_seconds
 from uwb_position_reader import UWBPositionReader
 
 # Relative to wherever `ros2 run`/`ros2 launch` is launched from (i.e. ros2_ws/)
@@ -207,18 +207,20 @@ class UwbNode(Node):
             pass
 
     def save_csv(self) -> None:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        run_id = resolve_run_id(OUTPUT_DIR, 'uwb_log_run', self.get_parameter('run_id').value)
+        run_id = (self.get_parameter('run_id').value or '').strip()
+        if not run_id:
+            run_id = time.strftime('%Y%m%d_%H%M%S')
+        run_dir = resolve_run_output_dir(run_id)
         filename = f'uwb_log_run{run_id}.csv'
 
-        with open(os.path.join(OUTPUT_DIR, filename), 'w', newline='') as f:
+        with open(os.path.join(run_dir, filename), 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['time_s', 'stamp_s', 'x', 'y', 'z', 'clamped'])
             writer.writerows(zip(
                 self.log_time, self.log_stamp_s, self.log_x, self.log_y, self.log_z,
                 self.log_clamped))
 
-        self.get_logger().info(f'Saved {filename}')
+        self.get_logger().info(f'Saved {filename} in {run_dir}')
 
     def destroy_node(self) -> None:
         self._stop_event.set()
