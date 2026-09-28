@@ -3,21 +3,25 @@
 Forward the outer loop's feeder-box trigger to the solenoid XIAO over BLE.
 
 Subscribes to std_msgs/Bool on /feeder_box_threshold_reached. On the first
-True, writes "RELEASE:<token>" to the command characteristic of the XIAO
-running xiao/solenoid_release/solenoid_release.ino, then reads its status
-characteristic to confirm it fired. Retries every retry_period_s until
-confirmed or release_timeout_s runs out. The XIAO treats repeat releases as
-no-ops, so retrying is safe. Once confirmed, this node latches: later True
-messages are ignored until restart, so the outer loop can publish True at
-its own rate without re-firing.
+True, writes "PULSE" to the command characteristic of the XIAO nRF52840
+running solenoid_release.ino, which pulses the relay for 500 ms. The write
+is sent with response, so a successful write means the XIAO received it.
+If the write fails it's retried every retry_period_s until it succeeds or
+release_timeout_s runs out; the sketch ignores PULSE during a pulse and for
+3 s after one, so a retry after a lost ack can't fire twice. Once
+acknowledged, this node latches: later True messages are ignored until
+restart, so the outer loop can publish True at its own rate without
+re-firing.
 
 A background task keeps a BLE connection to the XIAO open whenever it's in
 range (scan -> connect -> reconnect on drop), so the trigger only pays for
-one write + read (tens of ms) instead of a fresh scan/connect (1-2 s). BLE
-runs on its own asyncio thread so it never blocks the rclpy executor.
+one write (tens of ms) instead of a fresh scan/connect (1-2 s). Staying
+connected also matters because the sketch switches the relay off on
+disconnect. BLE runs on its own asyncio thread so it never blocks the rclpy
+executor.
 
 Publishes std_msgs/Bool on /solenoid_released (transient-local, so late
-subscribers still get it) once the XIAO has confirmed the release.
+subscribers still get it) once the XIAO has acknowledged the PULSE.
 
 Requires bleak on the Pi:
     sudo apt install python3-bleak      (or: pip install bleak)
@@ -33,13 +37,12 @@ CSV export
     (one row per event: time_s, stamp_s, event, detail). See run_logging.py.
 
 Parameters
-    xiao_name          str    "feeder-solenoid"  must match DEVICE_NAME in the sketch
-    xiao_address       str    ""     BLE address printed by the XIAO on boot;
+    xiao_name          str    "TigerBall-Latch"  must match DEVICE_NAME in the sketch
+    xiao_address       str    ""     XIAO BLE address (bluetoothctl scan on);
                                      if set, used instead of xiao_name
-    token              str    "tiger-feeder"     must match TOKEN in the sketch
     scan_timeout_s     float  5.0
     retry_period_s     float  0.2
-    release_timeout_s  float  15.0   give up if not confirmed within this
+    release_timeout_s  float  15.0   give up if not acknowledged within this
     run_id             str    ""
 """
 
@@ -61,9 +64,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from run_logging import resolve_run_output_dir
 
-# Must match solenoid_release.ino
-CMD_UUID = '6e0f0002-3b5a-4c2e-9d1a-2f5c8e7b4a10'
-STATUS_UUID = '6e0f0003-3b5a-4c2e-9d1a-2f5c8e7b4a10'
+# Must match COMMAND_UUID and the PULSE command in solenoid_release.ino
+CMD_UUID = '7b6a1001-6c3a-4c9f-ae60-62b79b0e5135'
+PULSE_CMD = b'PULSE'
 
 
 class SolenoidReleaseNode(Node):
@@ -71,9 +74,8 @@ class SolenoidReleaseNode(Node):
     def __init__(self):
         super().__init__('solenoid_release_node')
 
-        self.declare_parameter('xiao_name', 'feeder-solenoid')
+        self.declare_parameter('xiao_name', 'TigerBall-Latch')
         self.declare_parameter('xiao_address', '')
-        self.declare_parameter('token', 'tiger-feeder')
         self.declare_parameter('scan_timeout_s', 5.0)
         self.declare_parameter('retry_period_s', 0.2)
         self.declare_parameter('release_timeout_s', 15.0)
@@ -82,7 +84,6 @@ class SolenoidReleaseNode(Node):
 
         self.xiao_name = str(self.get_parameter('xiao_name').value)
         self.xiao_address = str(self.get_parameter('xiao_address').value).strip()
-        self.token = str(self.get_parameter('token').value)
         self.scan_timeout = float(self.get_parameter('scan_timeout_s').value)
         self.retry_period = float(self.get_parameter('retry_period_s').value)
         self.release_timeout = float(self.get_parameter('release_timeout_s').value)
@@ -149,11 +150,15 @@ class SolenoidReleaseNode(Node):
                     continue
                 client = BleakClient(device, disconnected_callback=self.on_disconnect)
                 await client.connect(timeout=10.0)
-                status = (await client.read_gatt_char(STATUS_UUID)).decode().strip()
+                if client.services.get_characteristic(CMD_UUID) is None:
+                    # Right name, wrong sketch -- writes would never land.
+                    await client.disconnect()
+                    raise RuntimeError(
+                        f'{device.address} has no command characteristic {CMD_UUID}; '
+                        'is solenoid_release.ino flashed?')
                 self.client = client
-                self.log_event('connected', f'{device.address} status={status}')
-                self.get_logger().info(
-                    f'Connected to XIAO {device.address} (status: {status})')
+                self.log_event('connected', device.address)
+                self.get_logger().info(f'Connected to XIAO {device.address}')
             except Exception as e:  # bleak raises a mix of BleakError/OSError/TimeoutError
                 self.log_event('connect_fail', str(e))
                 self.get_logger().warn(
@@ -176,9 +181,8 @@ class SolenoidReleaseNode(Node):
                 continue
             attempt += 1
             try:
-                await client.write_gatt_char(
-                    CMD_UUID, f'RELEASE:{self.token}'.encode(), response=True)
-                status = (await client.read_gatt_char(STATUS_UUID)).decode().strip()
+                # response=True: returns only once the XIAO has acknowledged the write.
+                await client.write_gatt_char(CMD_UUID, PULSE_CMD, response=True)
             except Exception as e:
                 self.log_event('write_fail', f'{e} attempt={attempt}')
                 self.get_logger().warn(
@@ -187,30 +191,22 @@ class SolenoidReleaseNode(Node):
                 await asyncio.sleep(self.retry_period)
                 continue
 
-            if status in ('released', 'already_released'):
-                latency_ms = (time.monotonic() - t0) * 1e3
-                with self.lock:
-                    self.released = True
-                    self.in_flight = False
-                self.released_pub.publish(Bool(data=True))
-                self.log_event('ack', f'{status} attempt={attempt} latency_ms={latency_ms:.0f}')
-                self.get_logger().info(
-                    f'XIAO confirmed: {status} (attempt {attempt}, {latency_ms:.0f} ms)')
-                return
-            if status == 'bad_token':
-                # Retrying won't fix a token mismatch.
-                self.log_event('bad_token', f'attempt={attempt}')
-                self.get_logger().error('XIAO rejected release: token mismatch')
-                break
-            self.log_event('unexpected_status', f'{status} attempt={attempt}')
-            await asyncio.sleep(self.retry_period)
+            latency_ms = (time.monotonic() - t0) * 1e3
+            with self.lock:
+                self.released = True
+                self.in_flight = False
+            self.released_pub.publish(Bool(data=True))
+            self.log_event('ack', f'attempt={attempt} latency_ms={latency_ms:.0f}')
+            self.get_logger().info(
+                f'XIAO acknowledged PULSE (attempt {attempt}, {latency_ms:.0f} ms)')
+            return
 
         # Gave up: clear in_flight so the next True from the outer loop retries.
         with self.lock:
             self.in_flight = False
         self.log_event('gave_up', f'attempts={attempt}')
         self.get_logger().error(
-            f'Solenoid release NOT confirmed after {attempt} attempts '
+            f'Solenoid release NOT acknowledged after {attempt} attempts '
             f'({self.release_timeout:.0f} s)')
 
     async def disconnect(self):

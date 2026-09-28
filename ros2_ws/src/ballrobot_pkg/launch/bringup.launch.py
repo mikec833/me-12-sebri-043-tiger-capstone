@@ -22,9 +22,9 @@ def generate_launch_description():
     imu_port_arg = DeclareLaunchArgument(
         'imu_port', default_value='/dev/serial0',
         description='Serial port for the IMU (Pi onboard UART)')
-    # The solenoid node finds the XIAO over BLE by name ("feeder-solenoid")
-    # by default. Pass the address the XIAO prints on boot to pin it to one
-    # board, e.g.:
+    # The solenoid node finds the XIAO over BLE by name ("TigerBall-Latch")
+    # by default. To pin it to one board, pass its address (shown by
+    # `bluetoothctl scan on` or nRF Connect), e.g.:
     #   ros2 launch ballrobot_pkg bringup.launch.py xiao_address:=AA:BB:CC:DD:EE:FF
     xiao_address_arg = DeclareLaunchArgument(
         'xiao_address', default_value='',
