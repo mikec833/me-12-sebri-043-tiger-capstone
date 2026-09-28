@@ -25,6 +25,7 @@ install(PROGRAMS
   src/nodes/controllers/teensy_interface_node.py
   src/nodes/controllers/cmd_vel_bridge.py
   src/nodes/controllers/wasd_teleop.py
+  src/nodes/controllers/solenoid_release_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
