@@ -1,5 +1,5 @@
 // solenoid_release.ino
-// Feeder-box solenoid lock release on a Seeed XIAO ESP32 (C3 / S3), commanded
+// Feeder-box solenoid lock release on a Seeed XIAO ESP32-S3, commanded
 // over Bluetooth Low Energy by solenoid_release_node.py on the Pi. On a valid
 // RELEASE the XIAO closes a relay for PULSE_MS, which puts a short 12 V pulse
 // across the solenoid lock and pops the feeder box.
@@ -15,8 +15,10 @@
 //                           "armed" | "released" | "already_released" | "bad_token" | "bad_cmd"
 //   The Pi writes a command, then reads STATUS to confirm it actually fired.
 //
-// Board:  XIAO ESP32C3/S3, arduino-esp32 core (2.0.x or 3.x), built-in BLE library.
-//         Attach the external antenna on the C3 -- range without it is a few metres.
+// Board:  XIAO ESP32S3 (Tools -> Board -> XIAO_ESP32S3), arduino-esp32 core (2.0.x
+//         or 3.x), built-in BLE library -- nothing extra to install. Screw on the
+//         external antenna that ships with it; it sets how far away the Pi can connect.
+//         (Also builds for a XIAO ESP32C3.)
 // Power: wall -> buck converter -> 5 V out (XIAO + relay module) and 12 V out (lock).
 // Wiring (relay module = board with its own transistor/optocoupler, not a bare relay):
 //   buck 5 V  -> XIAO 5V pin, relay VCC (5 V module; a 5 V module may not trigger
