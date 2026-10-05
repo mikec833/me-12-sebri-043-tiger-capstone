@@ -26,6 +26,7 @@ install(PROGRAMS
   src/nodes/controllers/cmd_vel_bridge.py
   src/nodes/controllers/wasd_teleop.py
   src/nodes/controllers/solenoid_release_node.py
+  src/nodes/controllers/sound_player_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
