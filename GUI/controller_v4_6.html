@@ -75,7 +75,6 @@
   <p class="footnote">Wheels-raised commissioning only. The software STOP is not a battery disconnect; keep the physical disconnect within reach. Full-output current and regenerative behavior are unverified.</p>
 </main>
 <script type="module">
-import { proportionalTargets, benchmarkTargets, rampSettings } from "./controller_core_v4.mjs";
 const SERVICE="6e400001-b5a3-f393-e0a9-e50e24dcca9e",RX="6e400002-b5a3-f393-e0a9-e50e24dcca9e",TX="6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const $=id=>document.getElementById(id), encoder=new TextEncoder(), decoder=new TextDecoder();
 let device=null,rx=null,armed=false,armPending=false,disarming=false,fault=false,firmwareReady=false,tab="proportional";
@@ -83,6 +82,9 @@ let writeChain=Promise.resolve(),pendingMotion=null,motionBusy=false,telemetryBu
 let batteryLastAt=0;
 let joystickPointer=null,joystickX=0,joystickY=0,padDirection=null,keyDirection=null;
 const heldPadPointers=new Map();
+// Drive maths lives in controller_core_v4.mjs. Loaded dynamically so a missing file only disables driving; the Pi heading compass still works.
+let proportionalTargets,benchmarkTargets,rampSettings,coreMissing=false;
+try{({proportionalTargets,benchmarkTargets,rampSettings}=await import("./controller_core_v4.mjs"))}catch(error){coreMissing=true}
 
 function log(message){const box=$("log");box.textContent+="\n"+message;box.scrollTop=box.scrollHeight}
 function status(message,kind=""){const node=$("status");node.textContent=message;node.className="status"+(kind?" "+kind:"")}
@@ -123,6 +125,7 @@ async function requestVersion(){
   },1500);
 }
 async function connect(){
+  if(coreMissing){status("Drive disabled · controller_core_v4.mjs missing","fault");log("controller_core_v4.mjs not found next to this page; driving is disabled. The Pi heading compass still works.");return}
   if(device?.gatt.connected){await sendDisarm("Disconnecting");device.gatt.disconnect();return}
   if(!navigator.bluetooth){status("Web Bluetooth unavailable","fault");log("Use a supported Chrome/Edge browser over HTTPS.");return}
   try{device=await navigator.bluetooth.requestDevice({filters:[{services:[SERVICE]}]});device.addEventListener("gattserverdisconnected",onDisconnected);const server=await device.gatt.connect();const service=await server.getPrimaryService(SERVICE);rx=await service.getCharacteristic(RX);const tx=await service.getCharacteristic(TX);await tx.startNotifications();tx.addEventListener("characteristicvaluechanged",onTelemetry);firmwareReady=false;versionAttempts=0;disarming=true;clearBattery();status("Connected · checking","ready");refreshControls();if(!await writeLine("K"))return;if(disarming){clearDisarmTimer();disarmTimer=setTimeout(()=>{if(disarming)linkFailure(new Error("Initial disarm was not confirmed"))},1200)}await requestVersion();log("Connected to "+(device.name||"XIAO"));}catch(error){log("Connection failed: "+error.message);onDisconnected()}
@@ -141,7 +144,7 @@ for(const button of document.querySelectorAll(".direction-button")){button.addEv
 const KEYS={ArrowUp:"forward",ArrowDown:"reverse",ArrowLeft:"left",ArrowRight:"right",w:"forward",s:"reverse",a:"left",d:"right"};document.addEventListener("keydown",event=>{const direction=KEYS[event.key];if(!direction||tab!=="benchmark"||!armed||heldPadPointers.size||event.target instanceof HTMLInputElement)return;event.preventDefault();if(!event.repeat){keyDirection=direction;sendMotion()}});document.addEventListener("keyup",event=>{const direction=KEYS[event.key];if(!direction||tab!=="benchmark"||!keyDirection||event.target instanceof HTMLInputElement)return;event.preventDefault();if(direction===keyDirection){keyDirection=null;sendMotion()}});
 $("connect").addEventListener("click",connect);$("arm").addEventListener("click",async()=>{if(!rx||!firmwareReady||armed||armPending||disarming||fault)return;if(!await writeLine(currentRamp()))return;armPending=true;status("Arming · waiting for XIAO");refreshControls();if(!await writeLine("A"))return;if(armPending){clearArmTimer();armTimer=setTimeout(()=>{if(armPending)linkFailure(new Error("Arm was not confirmed"))},1500)}});$("stop").addEventListener("click",()=>{void sendDisarm("STOP sent · disarming")});$("padStop").addEventListener("click",()=>{void sendDisarm("STOP sent · disarming")});$("tabProportional").addEventListener("click",()=>activateTab("proportional"));$("tabBenchmark").addEventListener("click",()=>activateTab("benchmark"));$("resetFault").addEventListener("click",async()=>{if(!rx||!fault)return;localDisarm();status("Reset sent · waiting for XIAO");await writeLine("R")});
 for(const id of ["pOutput","pCurve","pAccel","pBrake","bOutput","bCurve","bAccel","bBrake"]){const input=$(id),unit=id.includes("Accel")||id.includes("Brake")?" ms":"%";input.addEventListener("input",()=>{$(id+"Value").textContent=input.value+unit;if(armed&&((tab==="proportional"&&id.startsWith("p"))||(tab==="benchmark"&&id.startsWith("b")))&&!(id.includes("Accel")||id.includes("Brake")))sendMotion()});input.addEventListener("change",()=>{if(rx&&armed&&((tab==="proportional"&&id.startsWith("p"))||(tab==="benchmark"&&id.startsWith("b")))&&id!=="pCurve"&&id!=="bCurve")void writeLine(currentRamp())})}
-setInterval(()=>{if(armed&&rx)sendMotion()},100);window.addEventListener("blur",()=>{if(armed||armPending)void sendDisarm("Focus lost · disarming")});document.addEventListener("visibilitychange",()=>{if(document.hidden&&(armed||armPending))void sendDisarm("Page hidden · disarming")});refreshControls();
+setInterval(()=>{if(armed&&rx)sendMotion()},100);window.addEventListener("blur",()=>{if(armed||armPending)void sendDisarm("Focus lost · disarming")});document.addEventListener("visibilitychange",()=>{if(document.hidden&&(armed||armPending))void sendDisarm("Page hidden · disarming")});refreshControls();if(coreMissing){$("connect").disabled=true;status("Drive disabled · core file missing","fault");log("controller_core_v4.mjs not found; driving disabled. Connect Pi still works.")}
 setInterval(()=>{if(batteryLastAt&&Date.now()-batteryLastAt>4000)clearBattery("Reading stale")},1000);
 
 // ---- Pi heading link (heading_ble_node.py). Separate BLE device from the drive XIAO; display only, never commands motion.
