@@ -131,6 +131,15 @@ def generate_launch_description():
         parameters=[{'sound_file': LaunchConfiguration('sound_file')}],
     )
 
+    # Streams imu/data heading to the operator GUI over BLE (the Pi
+    # advertises as "TigerBall-Pi"); see heading_ble_node.py.
+    heading_ble_node = Node(
+        package='ballrobot_pkg',
+        executable='heading_ble_node.py',
+        name='heading_ble_node',
+        output='screen',
+    )
+
     imu_quaternion_node = Node(
         package='ballrobot_pkg',
         executable='imu_quaternion_node.py',
@@ -163,5 +172,6 @@ def generate_launch_description():
         cmd_vel_bridge_node,
         solenoid_release_node,
         sound_player_node,
+        heading_ble_node,
         imu_quaternion_node,
     ])
