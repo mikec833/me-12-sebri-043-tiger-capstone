@@ -4,6 +4,15 @@
 # Wire protocol (newline-terminated ASCII lines):
 #   Pi -> Teensy:  "REF,<left_rad_s>,<right_rad_s>\n"
 #   Teensy -> Pi:  "MEAS,<left_rad_s>,<right_rad_s>\n"
+#              or  "MEAS,<left_rad_s>,<right_rad_s>,<left_rad>,<right_rad>\n"
+#   (the optional trailing pair is total wheel angle from the encoders; the
+#   Teensy firmware sends the 3-field form, a board that also reports
+#   position can send the 5-field form)
+#
+# Measurements are published on wheel_states as sensor_msgs/JointState,
+# names ["left_wheel", "right_wheel"], velocity in rad/s, position in rad
+# (empty when the board only sends the 3-field form), header.stamp is the
+# time the line was read.
 
 
 import sys
@@ -28,9 +37,11 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from ballrobot_pkg.msg import LeftRightFloat32
+from sensor_msgs.msg import JointState
 from run_logging import resolve_run_output_dir
 
 DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
+WHEEL_NAMES = ['left_wheel', 'right_wheel']
 BAUD_RATE = 115200
 RECONNECT_PERIOD_S = 2.0
 
@@ -51,8 +62,6 @@ class TeensyInterfaceNode(Node):
         self.serial_conn = None
         self._last_connect_attempt = 0.0
         self._connect()
-
-        self._seq = 0
 
         # For the reference-vs-measured CSV export: one row per measurement,
         # tagged with whatever reference was in effect at that moment
@@ -85,8 +94,8 @@ class TeensyInterfaceNode(Node):
             LeftRightFloat32, 'wheel_speed_cmd', self.on_cmd, 10)
 
         # PUBLISHERS
-        # Teensy -> Pi: measured wheel speed theta_l/r_dot
-        self.speed_pub = self.create_publisher(LeftRightFloat32, 'wheel_speed_meas', 10)
+        # Teensy -> Pi: measured wheel speed theta_l/r_dot (and angle, if sent)
+        self.wheel_pub = self.create_publisher(JointState, 'wheel_states', 10)
 
         # Poll instead of blocking-read so callbacks still get serviced
         self.create_timer(0.02, self.poll_serial)  # 50 Hz
@@ -152,31 +161,32 @@ class TeensyInterfaceNode(Node):
                 continue
 
             parts = line.split(',')
-            if len(parts) != 3:
+            if len(parts) not in (3, 5):
                 self.get_logger().warn(f'Malformed line, skipping: {line}')
                 continue
 
             try:
-                left = float(parts[1])
-                right = float(parts[2])
+                values = [float(p) for p in parts[1:]]
             except ValueError:
                 self.get_logger().warn(f'Malformed line, skipping: {line}')
                 continue
+            left, right = values[0], values[1]
 
-            speed_msg = LeftRightFloat32()
-            speed_msg.left = left
-            speed_msg.right = right
-            speed_msg.seq_num = self._seq
-            self.speed_pub.publish(speed_msg)
+            now = self.get_clock().now()
+            wheel_msg = JointState()
+            wheel_msg.header.stamp = now.to_msg()
+            wheel_msg.name = WHEEL_NAMES
+            wheel_msg.velocity = [left, right]
+            if len(values) == 5:
+                wheel_msg.position = [values[2], values[3]]
+            self.wheel_pub.publish(wheel_msg)
 
             self.log_time.append(self.elapsed_seconds())
-            self.log_stamp_s.append(self.get_clock().now().nanoseconds * 1e-9)
+            self.log_stamp_s.append(now.nanoseconds * 1e-9)
             self.log_ref_left.append(self.ref_left)
             self.log_ref_right.append(self.ref_right)
             self.log_meas_left.append(left)
             self.log_meas_right.append(right)
-
-            self._seq += 1
 
     def elapsed_seconds(self):
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9

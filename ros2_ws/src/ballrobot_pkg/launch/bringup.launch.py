@@ -87,7 +87,7 @@ def generate_launch_description():
         cmd=['ros2', 'bag', 'record',
              '-o', ['bags/run_', LaunchConfiguration('run_id')],
              '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
-             '/wheel_speed_meas', '/wheel_speed_cmd', '/cmd_vel'],
+             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel'],
         output='screen',
         condition=IfCondition(LaunchConfiguration('record')),
     )
