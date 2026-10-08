@@ -22,6 +22,20 @@ def generate_launch_description():
     imu_port_arg = DeclareLaunchArgument(
         'imu_port', default_value='/dev/serial0',
         description='Serial port for the IMU (Pi onboard UART)')
+    # The solenoid node finds the XIAO over BLE by name ("TigerBall-Latch")
+    # by default. To pin it to one board, pass its address (shown by
+    # `bluetoothctl scan on` or nRF Connect), e.g.:
+    #   ros2 launch ballrobot_pkg bringup.launch.py xiao_address:=AA:BB:CC:DD:EE:FF
+    xiao_address_arg = DeclareLaunchArgument(
+        'xiao_address', default_value='',
+        description='BLE address of the feeder-box solenoid XIAO (empty = find by name)')
+
+    # Path is relative to where `ros2 launch` is run (ros2_ws/), so the
+    # default plays the repo's audio/ file. Override for another sound:
+    #   ros2 launch ballrobot_pkg bringup.launch.py sound_file:=/home/<user>/chicken.mp3
+    sound_file_arg = DeclareLaunchArgument(
+        'sound_file', default_value='../audio/pig_sound_effect.mp3',
+        description='Sound played on /play_sound out of the 3.5 mm jack')
 
     # imu_quaternion_node is a debug/visualization aid (converts imu/data's
     # yaw/pitch/roll to a quaternion on imu/data_quat for RViz/rqt_plot/
@@ -98,6 +112,34 @@ def generate_launch_description():
         parameters=[{'run_id': run_id_param}],
     )
 
+    solenoid_release_node = Node(
+        package='ballrobot_pkg',
+        executable='solenoid_release_node.py',
+        name='solenoid_release_node',
+        output='screen',
+        parameters=[{
+            'xiao_address': LaunchConfiguration('xiao_address'),
+            'run_id': run_id_param,
+        }],
+    )
+
+    sound_player_node = Node(
+        package='ballrobot_pkg',
+        executable='sound_player_node.py',
+        name='sound_player_node',
+        output='screen',
+        parameters=[{'sound_file': LaunchConfiguration('sound_file')}],
+    )
+
+    # Streams imu/data heading to the operator GUI over BLE (the Pi
+    # advertises as "TigerBall-Pi"); see heading_ble_node.py.
+    heading_ble_node = Node(
+        package='ballrobot_pkg',
+        executable='heading_ble_node.py',
+        name='heading_ble_node',
+        output='screen',
+    )
+
     imu_quaternion_node = Node(
         package='ballrobot_pkg',
         executable='imu_quaternion_node.py',
@@ -119,6 +161,8 @@ def generate_launch_description():
         teensy_port_arg,
         uwb_port_arg,
         imu_port_arg,
+        xiao_address_arg,
+        sound_file_arg,
         enable_imu_quat_arg,
         run_id_arg,
         run_id_log,
@@ -126,5 +170,8 @@ def generate_launch_description():
         uwb_node,
         imu_node,
         cmd_vel_bridge_node,
+        solenoid_release_node,
+        sound_player_node,
+        heading_ble_node,
         imu_quaternion_node,
     ])
