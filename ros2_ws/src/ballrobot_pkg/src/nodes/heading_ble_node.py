@@ -4,8 +4,9 @@ Stream IMU heading from the Pi to the operator GUI over BLE.
 
 The Pi acts as a BLE peripheral (GATT server), the same role the drive
 XIAO plays for the GUI, so the browser connects to it with Web Bluetooth
-and no Wi-Fi is needed. Subscribes to imu/data (ballrobot_pkg/ImuRvc from
-imu_node.py), keeps the latest sample, and notifies it at notify_rate_hz.
+and no Wi-Fi is needed. Subscribes to imu/rpy (geometry_msgs/Vector3Stamped
+from imu_node.py: x = roll, y = pitch, z = yaw, degrees), keeps the latest
+sample, and notifies it at notify_rate_hz.
 
 Characteristic value (ASCII, one complete sample per notification, no
 newline framing):
@@ -13,7 +14,7 @@ newline framing):
 Worst case "-179.9,-179.9,-179.9" is exactly 20 bytes, so it fits the
 default 23-byte ATT MTU without the GUI having to reassemble anything.
 Nothing is notified until the first IMU frame arrives, and nothing new is
-notified if imu/data stops, so the GUI's stale indicator trips.
+notified if imu/rpy stops, so the GUI's stale indicator trips.
 
 BNO085 RVC yaw is relative to the heading at IMU power-up, not magnetic
 north; the GUI's "Zero heading" button sets the reference.
@@ -47,7 +48,7 @@ from bless import (
     GATTAttributePermissions,
     GATTCharacteristicProperties,
 )
-from ballrobot_pkg.msg import ImuRvc
+from geometry_msgs.msg import Vector3Stamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
@@ -56,8 +57,9 @@ SERVICE_UUID = '7b6a2001-6c3a-4c9f-ae60-62b79b0e5135'
 HEADING_UUID = '7b6a2002-6c3a-4c9f-ae60-62b79b0e5135'
 
 
-def format_sample(msg: ImuRvc) -> bytes:
-    return f'{msg.yaw:.1f},{msg.pitch:.1f},{msg.roll:.1f}'.encode('ascii')[:20]
+def format_sample(msg: Vector3Stamped) -> bytes:
+    roll, pitch, yaw = msg.vector.x, msg.vector.y, msg.vector.z
+    return f'{yaw:.1f},{pitch:.1f},{roll:.1f}'.encode('ascii')[:20]
 
 
 class HeadingBleNode(Node):
@@ -77,7 +79,7 @@ class HeadingBleNode(Node):
         self.sent_count = 0
 
         self.sub = self.create_subscription(
-            ImuRvc, 'imu/data', self.imu_callback, qos_profile_sensor_data)
+            Vector3Stamped, 'imu/rpy', self.imu_callback, qos_profile_sensor_data)
         self.timer = self.create_timer(1.0 / max(rate, 1.0), self.notify_tick)
         self.status_timer = self.create_timer(10.0, self.report_status)
 
@@ -88,7 +90,7 @@ class HeadingBleNode(Node):
 
     # ---- rclpy side ----------------------------------------------------
 
-    def imu_callback(self, msg: ImuRvc):
+    def imu_callback(self, msg: Vector3Stamped):
         sample = format_sample(msg)
         with self.lock:
             self.latest = sample

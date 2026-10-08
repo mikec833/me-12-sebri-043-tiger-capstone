@@ -2,20 +2,20 @@
 """
 imu_quaternion_node.py
 
-Converts ballrobot_pkg/ImuRvc (yaw/pitch/roll in degrees, published by
-imu_node.py on imu/data) into a standard sensor_msgs/Imu with the
+Converts geometry_msgs/Vector3Stamped roll/pitch/yaw in degrees
+(x/y/z, published by imu_node.py on imu/rpy) into a standard sensor_msgs/Imu with the
 orientation expressed as a quaternion, republished on imu/data_quat.
 
 Pure debugging/calibration aid: lets you `ros2 topic echo imu/data_quat`
 or point rqt_plot / PlotJuggler at it. It does not add any fusion or
 correction -- it's the exact same yaw/pitch/roll from imu_node.py, just
 re-encoded. Note imu_node.py already publishes yaw in plain degrees on
-imu/data; that's the more human-readable signal for eyeballing heading
+imu/rpy; that's the more human-readable signal for eyeballing heading
 drift. This node exists for cases where you want the standard
 sensor_msgs/Imu quaternion format instead (e.g. RViz, robot_localization).
 
 angular_velocity is not provided by the BNO085's UART-RVC frame, and
-linear_acceleration in ImuRvc is raw, unscaled sensor counts (see
+imu/accel (imu_node.py) is raw, unscaled sensor counts (see
 imu_node.py's docstring) -- neither is safe to publish as real
 rad/s or m/s^2, so both are left zeroed with covariance[0] = -1
 ("no estimate"), per the sensor_msgs/Imu convention. Only orientation
@@ -23,14 +23,14 @@ is populated.
 
 Published topics
     imu/data_quat    sensor_msgs/Imu
-        orientation is the yaw/pitch/roll from imu/data converted to a
+        orientation is the yaw/pitch/roll from imu/rpy converted to a
         quaternion (ZYX intrinsic: yaw about Z, then pitch about Y,
         then roll about X). orientation_covariance is left at all
         zeros ("unknown but usable"), matching the fact that yaw/pitch/
         roll are real, just not yet validated against true north.
 
 Subscribed topics
-    imu/data    ballrobot_pkg/ImuRvc
+    imu/rpy    geometry_msgs/Vector3Stamped
 
 CSV export
     On shutdown, writes src/outputs/imu_quat_outputs/imu_quat_log_run<id>.csv
@@ -52,7 +52,7 @@ import math
 import os
 
 import rclpy
-from ballrobot_pkg.msg import ImuRvc
+from geometry_msgs.msg import Vector3Stamped
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -90,7 +90,7 @@ class ImuQuaternionNode(Node):
 
         self._pub = self.create_publisher(Imu, "imu/data_quat", qos_profile_sensor_data)
         self._sub = self.create_subscription(
-            ImuRvc, "imu/data", self._on_imu_rvc, qos_profile_sensor_data
+            Vector3Stamped, "imu/rpy", self._on_imu_rpy, qos_profile_sensor_data
         )
 
         # For the CSV export: one row per published message
@@ -105,11 +105,12 @@ class ImuQuaternionNode(Node):
         self.log_pitch = []
         self.log_roll = []
 
-    def _on_imu_rvc(self, rvc: ImuRvc) -> None:
-        qx, qy, qz, qw = euler_deg_to_quaternion(rvc.yaw, rvc.pitch, rvc.roll)
+    def _on_imu_rpy(self, rpy: Vector3Stamped) -> None:
+        roll, pitch, yaw = rpy.vector.x, rpy.vector.y, rpy.vector.z
+        qx, qy, qz, qw = euler_deg_to_quaternion(yaw, pitch, roll)
 
         msg = Imu()
-        msg.header = rvc.header
+        msg.header = rpy.header
 
         msg.orientation.x = qx
         msg.orientation.y = qy
@@ -124,14 +125,14 @@ class ImuQuaternionNode(Node):
         self._pub.publish(msg)
 
         self.log_time.append(self.elapsed_seconds())
-        self.log_stamp_s.append(stamp_to_seconds(rvc.header.stamp))
+        self.log_stamp_s.append(stamp_to_seconds(rpy.header.stamp))
         self.log_qx.append(qx)
         self.log_qy.append(qy)
         self.log_qz.append(qz)
         self.log_qw.append(qw)
-        self.log_yaw.append(rvc.yaw)
-        self.log_pitch.append(rvc.pitch)
-        self.log_roll.append(rvc.roll)
+        self.log_yaw.append(yaw)
+        self.log_pitch.append(pitch)
+        self.log_roll.append(roll)
 
     def elapsed_seconds(self) -> float:
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9

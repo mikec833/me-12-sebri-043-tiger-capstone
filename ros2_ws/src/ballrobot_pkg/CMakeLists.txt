@@ -10,7 +10,6 @@ find_package(rosidl_default_generators REQUIRED)
 
 # Custom messages
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/ImuRvc.msg"
   "msg/LeftRightFloat32.msg"
   "msg/LeftRightInt32.msg"
   "msg/ServoPulseWidth.msg"

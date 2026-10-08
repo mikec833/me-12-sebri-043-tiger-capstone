@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -37,7 +37,7 @@ def generate_launch_description():
         'sound_file', default_value='../audio/pig_sound_effect.mp3',
         description='Sound played on /play_sound out of the 3.5 mm jack')
 
-    # imu_quaternion_node is a debug/visualization aid (converts imu/data's
+    # imu_quaternion_node is a debug/visualization aid (converts imu/rpy's
     # yaw/pitch/roll to a quaternion on imu/data_quat for RViz/rqt_plot/
     # topic echo) rather than something the robot needs every run, so it's
     # opt-in:
@@ -70,6 +70,27 @@ def generate_launch_description():
     # ParameterValue(..., value_type=str) forces it to stay a string
     # regardless of what it looks like.
     run_id_param = ParameterValue(LaunchConfiguration('run_id'), value_type=str)
+
+    # Opt-in rosbag recording of every sensor/command topic, into
+    # bags/run_<run_id> (relative to where `ros2 launch` is run from,
+    # i.e. ros2_ws/ -- same as the CSVs). Run via launch rather than a
+    # separate terminal so Ctrl-C reaches the recorder and the bag is
+    # closed cleanly alongside the nodes:
+    #   ros2 launch ballrobot_pkg bringup.launch.py record:=true
+    # /imu/data_quat is listed even when enable_imu_quat is false; the
+    # recorder just never sees it.
+    record_arg = DeclareLaunchArgument(
+        'record', default_value='false',
+        description='Also record all sensor/command topics with ros2 bag')
+
+    bag_recorder = ExecuteProcess(
+        cmd=['ros2', 'bag', 'record',
+             '-o', ['bags/run_', LaunchConfiguration('run_id')],
+             '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
+             '/wheel_speed_meas', '/wheel_speed_cmd', '/cmd_vel'],
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('record')),
+    )
 
     teensy_interface_node = Node(
         package='ballrobot_pkg',
@@ -131,7 +152,7 @@ def generate_launch_description():
         parameters=[{'sound_file': LaunchConfiguration('sound_file')}],
     )
 
-    # Streams imu/data heading to the operator GUI over BLE (the Pi
+    # Streams imu/rpy heading to the operator GUI over BLE (the Pi
     # advertises as "TigerBall-Pi"); see heading_ble_node.py.
     heading_ble_node = Node(
         package='ballrobot_pkg',
@@ -165,6 +186,7 @@ def generate_launch_description():
         sound_file_arg,
         enable_imu_quat_arg,
         run_id_arg,
+        record_arg,
         run_id_log,
         teensy_interface_node,
         uwb_node,
@@ -174,4 +196,5 @@ def generate_launch_description():
         sound_player_node,
         heading_ble_node,
         imu_quaternion_node,
+        bag_recorder,
     ])
