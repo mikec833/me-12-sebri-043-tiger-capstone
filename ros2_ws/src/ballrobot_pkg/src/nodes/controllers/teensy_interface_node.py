@@ -177,7 +177,7 @@ class TeensyInterfaceNode(Node):
             wheel_msg.header.stamp = now.to_msg()
             wheel_msg.name = WHEEL_NAMES
             wheel_msg.velocity = [left, right]
-            if len(values) == 5:
+            if len(values) == 4:
                 wheel_msg.position = [values[2], values[3]]
             self.wheel_pub.publish(wheel_msg)
 

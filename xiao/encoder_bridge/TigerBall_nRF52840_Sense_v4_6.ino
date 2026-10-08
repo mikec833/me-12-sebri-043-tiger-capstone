@@ -462,27 +462,35 @@ void onBleDisconnect(uint16_t, uint8_t) {
 // ---------------- USB serial encoder report for the Raspberry Pi ----------------
 // "MEAS,<left_rad_s>,<right_rad_s>,<left_rad>,<right_rad>\r\n" every 10 ms on USB
 // serial, read by the Pi's teensy_interface_node and published as /wheel_states
-// (sensor_msgs/JointState). Speed is measured over each 10 ms interval, the same as
-// the Teensy inner_motor_controller; angle is total wheel rotation since power-up.
+// (sensor_msgs/JointState). Speed is measured over the real interval since the last
+// sample (nominally 10 ms, longer if the loop was held up by BLE work), so a late
+// sample never inflates the speed; if the loop falls behind, the schedule resyncs
+// instead of bursting catch-up samples. Angle is total wheel rotation since power-up.
 // Read-only: it only snapshots leftCount/rightCount and never touches motor, BLE or
 // control state. Writes are skipped rather than blocking when USB is not attached
 // or not being read, and anything the Pi sends (REF lines) is discarded.
 constexpr uint32_t SERIAL_REPORT_INTERVAL_US = 10000;
-constexpr float SERIAL_REPORT_INTERVAL_S = SERIAL_REPORT_INTERVAL_US * 1.0e-6f;
 constexpr float COUNTS_TO_RAD = 2.0f * PI / COUNTS_PER_OUTPUT_REV;
-constexpr float COUNTS_TO_RAD_PER_SEC = COUNTS_TO_RAD / SERIAL_REPORT_INTERVAL_S;
 // Verify on the bench: rolling a wheel forward must give a positive value.
 constexpr int8_t SERIAL_ENC_L_POLARITY = 1;
-constexpr int8_t SERIAL_ENC_R_POLARITY = 1;
+constexpr int8_t SERIAL_ENC_R_POLARITY = -1;
 uint32_t lastSerialReportUs = 0;
+uint32_t lastSerialSampleUs = 0;
 int32_t serialPrevLeftCount = 0;
 int32_t serialPrevRightCount = 0;
 
 void updateSerialEncoderReport() {
   while (Serial.available() > 0) Serial.read();
 
-  if (micros() - lastSerialReportUs < SERIAL_REPORT_INTERVAL_US) return;
-  lastSerialReportUs += SERIAL_REPORT_INTERVAL_US;  // fixed schedule, no drift
+  const uint32_t nowUs = micros();
+  if (nowUs - lastSerialReportUs < SERIAL_REPORT_INTERVAL_US) return;
+  if (nowUs - lastSerialReportUs >= 2 * SERIAL_REPORT_INTERVAL_US) {
+    lastSerialReportUs = nowUs;  // fell behind: resync rather than burst
+  } else {
+    lastSerialReportUs += SERIAL_REPORT_INTERVAL_US;  // fixed schedule, no drift
+  }
+  const float elapsedS = (nowUs - lastSerialSampleUs) * 1.0e-6f;
+  lastSerialSampleUs = nowUs;
 
   int32_t leftSnapshot;
   int32_t rightSnapshot;
@@ -493,8 +501,8 @@ void updateSerialEncoderReport() {
   const int32_t left = SERIAL_ENC_L_POLARITY * leftSnapshot;
   const int32_t right = SERIAL_ENC_R_POLARITY * rightSnapshot;
 
-  const float leftRadS = (left - serialPrevLeftCount) * COUNTS_TO_RAD_PER_SEC;
-  const float rightRadS = (right - serialPrevRightCount) * COUNTS_TO_RAD_PER_SEC;
+  const float leftRadS = (left - serialPrevLeftCount) * COUNTS_TO_RAD / elapsedS;
+  const float rightRadS = (right - serialPrevRightCount) * COUNTS_TO_RAD / elapsedS;
   serialPrevLeftCount = left;
   serialPrevRightCount = right;
 
@@ -563,6 +571,7 @@ void setup() {
   // USB serial encoder report for the Pi; never waits for a host.
   Serial.begin(115200);
   lastSerialReportUs = micros();
+  lastSerialSampleUs = lastSerialReportUs;
 
   const uint32_t now = millis();
   lastCommandMs = now;
