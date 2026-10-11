@@ -17,16 +17,19 @@ bno085_rvc.py itself is unmodified; run it standalone if you want the
 plain non-ROS smoke test it already provides.
 
 Published topics
-    imu/data    ballrobot_pkg/ImuRvc
-        One message per valid frame, carrying yaw/pitch/roll (deg) and
-        accel_x/y/z (raw signed 16-bit counts, UNCONVERTED) together,
-        since they're decoded from the same 19-byte frame. The source
-        frame format documents yaw/pitch/roll as 0.01 deg/LSB but does
-        not document an accel scale ("x/y/z acceleration (int16 each,
-        LSB first) -- unused here"). Treat accel_x/y/z as raw sensor
-        counts, not m/s^2 or g, until the LSB scale is confirmed
-        against CEVA's BNO08x datasheet. See
-        msg/ImuRvc.msg (in this package) for field definitions.
+    imu/rpy      geometry_msgs/Vector3Stamped
+        Orientation as Euler angles in degrees: x = roll, y = pitch,
+        z = yaw (the frame documents these as 0.01 deg/LSB).
+    imu/accel    geometry_msgs/Vector3Stamped
+        Acceleration x/y/z as raw signed 16-bit counts, UNCONVERTED.
+        The source frame format does not document an accel scale
+        ("x/y/z acceleration (int16 each, LSB first) -- unused here").
+        Treat these as raw sensor counts, not m/s^2 or g, until the
+        LSB scale is confirmed against CEVA's BNO08x datasheet.
+
+    Both are decoded from the same 19-byte frame and published
+    together with an identical header, so consumers can pair them on
+    header.stamp (e.g. message_filters.TimeSynchronizer).
 
 Publishes only when a frame arrives with a valid checksum. Nothing is
 published before the first valid frame, and nothing is published for
@@ -64,7 +67,7 @@ import traceback
 
 import rclpy
 import serial
-from ballrobot_pkg.msg import ImuRvc
+from geometry_msgs.msg import Vector3Stamped
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.duration import Duration
 from rclpy.node import Node
@@ -102,8 +105,11 @@ class ImuNode(Node):
         self._frame_count = 0
         self._checksum_fail_count = 0
 
-        self._pub_imu = self.create_publisher(
-            ImuRvc, "imu/data", qos_profile_sensor_data
+        self._pub_rpy = self.create_publisher(
+            Vector3Stamped, "imu/rpy", qos_profile_sensor_data
+        )
+        self._pub_accel = self.create_publisher(
+            Vector3Stamped, "imu/accel", qos_profile_sensor_data
         )
 
         # For the CSV export: one row per published frame
@@ -203,25 +209,30 @@ class ImuNode(Node):
         age_s = max(0.0, time.monotonic() - receipt_time + latency_s)
         stamp = (self.get_clock().now() - Duration(seconds=age_s)).to_msg()
 
-        msg = ImuRvc()
-        msg.header.stamp = stamp
-        msg.header.frame_id = self.get_parameter("frame_id").value
-        msg.yaw = yaw_raw / 100.0
-        msg.pitch = pitch_raw / 100.0
-        msg.roll = roll_raw / 100.0
-        msg.accel_x = float(accel_x_raw)
-        msg.accel_y = float(accel_y_raw)
-        msg.accel_z = float(accel_z_raw)
-        self._pub_imu.publish(msg)
+        rpy = Vector3Stamped()
+        rpy.header.stamp = stamp
+        rpy.header.frame_id = self.get_parameter("frame_id").value
+        rpy.vector.x = roll_raw / 100.0
+        rpy.vector.y = pitch_raw / 100.0
+        rpy.vector.z = yaw_raw / 100.0
+
+        accel = Vector3Stamped()
+        accel.header = rpy.header
+        accel.vector.x = float(accel_x_raw)
+        accel.vector.y = float(accel_y_raw)
+        accel.vector.z = float(accel_z_raw)
+
+        self._pub_rpy.publish(rpy)
+        self._pub_accel.publish(accel)
 
         self.log_time.append(self.elapsed_seconds())
         self.log_stamp_s.append(stamp_to_seconds(stamp))
-        self.log_yaw.append(msg.yaw)
-        self.log_pitch.append(msg.pitch)
-        self.log_roll.append(msg.roll)
-        self.log_accel_x.append(msg.accel_x)
-        self.log_accel_y.append(msg.accel_y)
-        self.log_accel_z.append(msg.accel_z)
+        self.log_yaw.append(rpy.vector.z)
+        self.log_pitch.append(rpy.vector.y)
+        self.log_roll.append(rpy.vector.x)
+        self.log_accel_x.append(accel.vector.x)
+        self.log_accel_y.append(accel.vector.y)
+        self.log_accel_z.append(accel.vector.z)
 
     def elapsed_seconds(self) -> float:
         return (self.get_clock().now() - self.start_time).nanoseconds * 1e-9

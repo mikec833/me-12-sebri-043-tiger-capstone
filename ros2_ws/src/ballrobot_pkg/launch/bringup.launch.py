@@ -1,23 +1,43 @@
+import glob
 from datetime import datetime
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+# USB name patterns under /dev/serial/by-id/, tried in order. Unlike
+# /dev/ttyACM<n>, which is handed out in plug-in/boot order and swaps
+# between runs, these names are fixed per device.
+MOTOR_BOARD_PORT_PATTERNS = ['usb-Seeed_XIAO_nRF52840*']
+UWB_PORT_PATTERNS = ['usb-Nordic_Semiconductor_nRF52*']
+
+
+def find_serial_port(patterns, fallback):
+    """First /dev/serial/by-id/ entry matching a pattern, else fallback."""
+    for pattern in patterns:
+        matches = sorted(glob.glob(f'/dev/serial/by-id/{pattern}'))
+        if matches:
+            return matches[0]
+    return fallback
+
+
 def generate_launch_description():
-    # Defaults assume the Teensy enumerates before the UWB tag. Verify
-    # with `ls /dev/ttyACM*` (or dmesg) after plugging both in, and
-    # override here if they land the other way around, e.g.:
+    # The motor board (drive XIAO) and the UWB tag are found
+    # by their fixed USB names (see *_PORT_PATTERNS above), falling back to
+    # ttyACM0/ttyACM1 if not found. Check with `ls -l /dev/serial/by-id/`;
+    # override either one explicitly if needed, e.g.:
     #   ros2 launch ballrobot_pkg bringup.launch.py teensy_port:=/dev/ttyACM1 uwb_port:=/dev/ttyACM0
     teensy_port_arg = DeclareLaunchArgument(
-        'teensy_port', default_value='/dev/ttyACM0',
-        description='Serial port for the Teensy inner-loop motor controller')
+        'teensy_port',
+        default_value=find_serial_port(MOTOR_BOARD_PORT_PATTERNS, '/dev/ttyACM0'),
+        description='Serial port for the drive XIAO (encoder MEAS lines)')
     uwb_port_arg = DeclareLaunchArgument(
-        'uwb_port', default_value='/dev/ttyACM1',
+        'uwb_port',
+        default_value=find_serial_port(UWB_PORT_PATTERNS, '/dev/ttyACM1'),
         description='Serial port for the UWB tag (must differ from teensy_port)')
     imu_port_arg = DeclareLaunchArgument(
         'imu_port', default_value='/dev/serial0',
@@ -37,7 +57,7 @@ def generate_launch_description():
         'sound_file', default_value='../audio/pig_sound_effect.mp3',
         description='Sound played on /play_sound out of the 3.5 mm jack')
 
-    # imu_quaternion_node is a debug/visualization aid (converts imu/data's
+    # imu_quaternion_node is a debug/visualization aid (converts imu/rpy's
     # yaw/pitch/roll to a quaternion on imu/data_quat for RViz/rqt_plot/
     # topic echo) rather than something the robot needs every run, so it's
     # opt-in:
@@ -70,6 +90,27 @@ def generate_launch_description():
     # ParameterValue(..., value_type=str) forces it to stay a string
     # regardless of what it looks like.
     run_id_param = ParameterValue(LaunchConfiguration('run_id'), value_type=str)
+
+    # Opt-in rosbag recording of every sensor/command topic, into
+    # bags/run_<run_id> (relative to where `ros2 launch` is run from,
+    # i.e. ros2_ws/ -- same as the CSVs). Run via launch rather than a
+    # separate terminal so Ctrl-C reaches the recorder and the bag is
+    # closed cleanly alongside the nodes:
+    #   ros2 launch ballrobot_pkg bringup.launch.py record:=true
+    # /imu/data_quat is listed even when enable_imu_quat is false; the
+    # recorder just never sees it.
+    record_arg = DeclareLaunchArgument(
+        'record', default_value='false',
+        description='Also record all sensor/command topics with ros2 bag')
+
+    bag_recorder = ExecuteProcess(
+        cmd=['ros2', 'bag', 'record',
+             '-o', ['bags/run_', LaunchConfiguration('run_id')],
+             '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
+             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel'],
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('record')),
+    )
 
     teensy_interface_node = Node(
         package='ballrobot_pkg',
@@ -131,7 +172,7 @@ def generate_launch_description():
         parameters=[{'sound_file': LaunchConfiguration('sound_file')}],
     )
 
-    # Streams imu/data heading to the operator GUI over BLE (the Pi
+    # Streams imu/rpy heading to the operator GUI over BLE (the Pi
     # advertises as "TigerBall-Pi"); see heading_ble_node.py.
     heading_ble_node = Node(
         package='ballrobot_pkg',
@@ -147,6 +188,11 @@ def generate_launch_description():
         output='screen',
         parameters=[{'run_id': run_id_param}],
         condition=IfCondition(LaunchConfiguration('enable_imu_quat')),
+    )
+
+    port_log = LogInfo(
+        msg=['Motor board port: ', LaunchConfiguration('teensy_port'),
+             ' | UWB port: ', LaunchConfiguration('uwb_port')],
     )
 
     run_id_log = LogInfo(
@@ -165,7 +211,9 @@ def generate_launch_description():
         sound_file_arg,
         enable_imu_quat_arg,
         run_id_arg,
+        record_arg,
         run_id_log,
+        port_log,
         teensy_interface_node,
         uwb_node,
         imu_node,
@@ -174,4 +222,5 @@ def generate_launch_description():
         sound_player_node,
         heading_ble_node,
         imu_quaternion_node,
+        bag_recorder,
     ])
