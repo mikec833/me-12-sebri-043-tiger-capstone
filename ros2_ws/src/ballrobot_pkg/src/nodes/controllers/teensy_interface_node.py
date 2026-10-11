@@ -44,6 +44,7 @@ DEFAULT_SERIAL_PORT = '/dev/ttyACM0'
 WHEEL_NAMES = ['left_wheel', 'right_wheel']
 BAUD_RATE = 115200
 RECONNECT_PERIOD_S = 2.0
+MAX_PARTIAL_LINE_BYTES = 1024
 
 # Relative to wherever `ros2 run` is launched from (i.e. ros2_ws/)
 OUTPUT_DIR = 'src/outputs/wheel_outputs'
@@ -61,6 +62,10 @@ class TeensyInterfaceNode(Node):
 
         self.serial_conn = None
         self._last_connect_attempt = 0.0
+        # Bytes received but not yet terminated by a newline; only complete
+        # lines are parsed, so a line split across two reads is never
+        # mistaken for a shorter valid one.
+        self._rx_buffer = bytearray()
         self._connect()
 
         # For the reference-vs-measured CSV export: one row per measurement,
@@ -120,6 +125,7 @@ class TeensyInterfaceNode(Node):
         except Exception:
             pass
         self.serial_conn = None
+        self._rx_buffer.clear()
 
     def _ensure_connected(self):
         if self.serial_conn is not None:
@@ -144,18 +150,28 @@ class TeensyInterfaceNode(Node):
         self.ref_left = msg.left
         self.ref_right = msg.right
 
-    def poll_serial(self): # drains every line currently buffered, not just one
+    def poll_serial(self): # drains every complete line currently buffered, not just one
         if not self._ensure_connected():
             return
 
-        while True:
-            try:
-                line = self.serial_conn.readline().decode('ascii', errors='ignore').strip()
-            except serial.SerialException:
-                self._disconnect()
-                return
+        try:
+            waiting = self.serial_conn.in_waiting
+            if waiting:
+                self._rx_buffer += self.serial_conn.read(waiting)
+        except (serial.SerialException, OSError):
+            self._disconnect()
+            return
+
+        *lines, remainder = self._rx_buffer.split(b'\n')
+        self._rx_buffer = bytearray(remainder)
+        if len(self._rx_buffer) > MAX_PARTIAL_LINE_BYTES:
+            self.get_logger().warn('No newline in serial data, discarding buffer')
+            self._rx_buffer.clear()
+
+        for raw in lines:
+            line = raw.decode('ascii', errors='ignore').strip()
             if not line:
-                break
+                continue
             if not line.startswith('MEAS'):
                 self.get_logger().info(f'Teensy: {line}')
                 continue
