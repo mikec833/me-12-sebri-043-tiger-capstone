@@ -5,6 +5,7 @@
 #
 # Extra arguments are passed straight to the launch file, e.g.
 #   ./scripts/run_sensors.sh teensy_port:=/dev/ttyACM1 uwb_port:=/dev/ttyACM0
+#   (ports are auto-detected by USB name; only override if that picks wrong)
 #   ./scripts/run_sensors.sh record:=false      # nodes only, no bag
 set -eo pipefail
 

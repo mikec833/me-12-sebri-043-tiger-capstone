@@ -1,3 +1,4 @@
+import glob
 from datetime import datetime
 
 from launch import LaunchDescription
@@ -8,16 +9,35 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+# USB name patterns under /dev/serial/by-id/, tried in order. Unlike
+# /dev/ttyACM<n>, which is handed out in plug-in/boot order and swaps
+# between runs, these names are fixed per device.
+MOTOR_BOARD_PORT_PATTERNS = ['usb-Seeed_XIAO_nRF52840*']
+UWB_PORT_PATTERNS = ['usb-Nordic_Semiconductor_nRF52*']
+
+
+def find_serial_port(patterns, fallback):
+    """First /dev/serial/by-id/ entry matching a pattern, else fallback."""
+    for pattern in patterns:
+        matches = sorted(glob.glob(f'/dev/serial/by-id/{pattern}'))
+        if matches:
+            return matches[0]
+    return fallback
+
+
 def generate_launch_description():
-    # Defaults assume the Teensy enumerates before the UWB tag. Verify
-    # with `ls /dev/ttyACM*` (or dmesg) after plugging both in, and
-    # override here if they land the other way around, e.g.:
+    # The motor board (drive XIAO) and the UWB tag are found
+    # by their fixed USB names (see *_PORT_PATTERNS above), falling back to
+    # ttyACM0/ttyACM1 if not found. Check with `ls -l /dev/serial/by-id/`;
+    # override either one explicitly if needed, e.g.:
     #   ros2 launch ballrobot_pkg bringup.launch.py teensy_port:=/dev/ttyACM1 uwb_port:=/dev/ttyACM0
     teensy_port_arg = DeclareLaunchArgument(
-        'teensy_port', default_value='/dev/ttyACM0',
-        description='Serial port for the Teensy inner-loop motor controller')
+        'teensy_port',
+        default_value=find_serial_port(MOTOR_BOARD_PORT_PATTERNS, '/dev/ttyACM0'),
+        description='Serial port for the drive XIAO (encoder MEAS lines)')
     uwb_port_arg = DeclareLaunchArgument(
-        'uwb_port', default_value='/dev/ttyACM1',
+        'uwb_port',
+        default_value=find_serial_port(UWB_PORT_PATTERNS, '/dev/ttyACM1'),
         description='Serial port for the UWB tag (must differ from teensy_port)')
     imu_port_arg = DeclareLaunchArgument(
         'imu_port', default_value='/dev/serial0',
@@ -170,6 +190,11 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_imu_quat')),
     )
 
+    port_log = LogInfo(
+        msg=['Motor board port: ', LaunchConfiguration('teensy_port'),
+             ' | UWB port: ', LaunchConfiguration('uwb_port')],
+    )
+
     run_id_log = LogInfo(
         msg=['Run ID for this bringup: ', LaunchConfiguration('run_id'),
              ' (pass --ros-args -p run_id:=', LaunchConfiguration('run_id'),
@@ -188,6 +213,7 @@ def generate_launch_description():
         run_id_arg,
         record_arg,
         run_id_log,
+        port_log,
         teensy_interface_node,
         uwb_node,
         imu_node,
