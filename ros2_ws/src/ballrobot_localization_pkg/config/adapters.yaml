@@ -63,9 +63,12 @@ imu_adapter:
     # about 1010 counts on one axis at rest. Gravity is NOT removed.
     accel_scale: 9.80665e-3
 
-    # Heading alignment. yaw_used = yaw_sign * yaw + yaw_offset_deg.
-    # TODO: verify yaw_sign with a slow counter clockwise turn (ROS yaw must
-    # increase). TODO: measure yaw_offset_deg so heading 0 points along map +x.
+    # yaw_used = yaw_sign * yaw + yaw_offset_deg.
+    # yaw_sign matters: it sets the sign of the yaw rate the EKF fuses.
+    # TODO calibrate: a slow counter clockwise turn must give a positive rate
+    # (calibrate.py reports a negative b_eff if this is wrong).
+    # yaw_offset_deg only shifts the published orientation, which the single
+    # EKF does not fuse (RVC yaw is relative; heading comes from alignment).
     yaw_sign: 1.0
     yaw_offset_deg: 0.0
 
@@ -73,8 +76,7 @@ imu_adapter:
     # good to about 2 deg: (0.035 rad)^2.
     roll_variance: 0.0012
     pitch_variance: 0.0012
-    # Inflated for magnetometer EMI from the Sabertooth: about 10 deg, (0.17 rad)^2.
-    # TODO: tune from runs B versus A.
+    # About 10 deg, (0.17 rad)^2. Not fused by the single EKF.
     yaw_variance: 0.03
 
     # The RVC frame has no gyro output, so angular velocity is derived from
@@ -82,6 +84,10 @@ imu_adapter:
     # (5 samples at 100 Hz = 50 ms window, about 25 ms lag).
     derive_angular_velocity: true
     angular_velocity_window: 5
+    # world_yaw: heading rate d(yaw)/dt, correct while the chassis tilts in the
+    # shell (the EKF fuses only this). body: full body rate. The mount angles
+    # (mount_roll/pitch/yaw) are set by localization.launch.py from imu_roll etc.
+    angular_velocity_mode: world_yaw
     angular_velocity_variance: 0.0025    # (rad/s)^2, about 3 deg/s
     linear_acceleration_variance: 0.25   # (m/s^2)^2, about 0.5 m/s^2
 

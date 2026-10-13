@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'calibration_drive = robot_navigation_pkg.calibration_drive:main',
+            'align_heading = robot_navigation_pkg.align_heading:main',
         ],
     },
 )

@@ -37,6 +37,18 @@ def test_body_angular_velocity_wraps():
     assert g.body_angular_velocity(q0, q1, 0.0) is None
 
 
+def test_world_yaw_rate_through_mount():
+    # Upside down mount (roll pi): base +z yaw rate is sensor -z.
+    mount = g.euler_deg_to_quaternion(180, 0, 0)
+    assert close(g.world_yaw_rate_in_sensor(0.5, mount), (0, 0, -0.5))
+    # Identity mount passes straight through.
+    assert close(g.world_yaw_rate_in_sensor(0.5, (0, 0, 0, 1)), (0, 0, 0.5))
+    # Round trip: rotating the sensor vector by the mount gives base (0, 0, w).
+    mount = g.euler_deg_to_quaternion(170, 12, 40)
+    v = g.world_yaw_rate_in_sensor(0.7, mount)
+    assert close(g.rotate_vector(mount, v), (0, 0, 0.7))
+
+
 def test_plane_distance_matches_clamp_signature():
     plane = g.plane_from_points((0, 0, 1.3), (1.8, 0, 1.3), (0, 1.8, 1.3))
     assert g.distance_to_plane((-1.797, 0.768, 1.3), plane) < 1e-12

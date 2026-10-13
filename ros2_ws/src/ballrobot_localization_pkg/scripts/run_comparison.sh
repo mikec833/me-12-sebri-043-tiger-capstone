@@ -25,7 +25,7 @@ RESULTS="$PKG_DIR/results"
 EVAL="$PKG_DIR/scripts/evaluate.py"
 RECORD_TOPICS=(/uwb/position /imu/rpy /imu/accel /wheel_states
                /localization/uwb_pose /localization/imu /localization/wheel_odom
-               /odometry/local /odometry/global /diagnostics /tf /tf_static)
+               /odometry/filtered /diagnostics /tf /tf_static)
 
 run_one() {
     local label="$1"; shift
@@ -56,10 +56,10 @@ run_one() {
     python3 "$EVAL" "${eval_args[@]}"
 }
 
-run_one A "" fuse_imu_yaw:=true use_wheel_odom:=true
-run_one B "" fuse_imu_yaw:=false use_wheel_odom:=true
-run_one C "" fuse_imu_yaw:=true use_wheel_odom:=false
-run_one D "$DROP_START,$DROP_END" fuse_imu_yaw:=true use_wheel_odom:=true \
+run_one A "" use_imu:=true use_wheel_odom:=true
+run_one B "" use_imu:=false use_wheel_odom:=true
+run_one C "" use_imu:=true use_wheel_odom:=false
+run_one D "$DROP_START,$DROP_END" use_imu:=true use_wheel_odom:=true \
     "uwb_dropout:=$DROP_START,$DROP_END"
 
 python3 "$EVAL" summarize --results "$RESULTS"

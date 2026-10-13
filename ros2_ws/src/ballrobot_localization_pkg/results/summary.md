@@ -7,11 +7,13 @@ ROS 2 is needed to replay. Once a bag with UWB exists, run on the Pi:
 src/ballrobot_localization_pkg/scripts/run_comparison.sh bags/run_<id> <dropout_start_s>
 ```
 
-That replaces this file with the table below, filled in, plus figures per run.
+Run an alignment drive first (robot_navigation_pkg align_heading) or the
+heading in each replay starts unknown. That replaces this file with the table
+below, filled in, plus figures per run.
 
-| Run | fuse_imu_yaw | Wheel odom | Purpose | global Hz | local Hz | clamped dropped | over gate (est.) | dropout drift global (m) | GT RMS global (m) | final cov trace (m^2) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | true | on | Baseline | not run | | | | | | |
-| B | false | on | Effect of magnetometer EMI | not run | | | | | | |
-| C | true | off | Value of the encoders | not run | | | | | | |
-| D | true | on, 10 s UWB dropout | Drift under canopy | not run | | | | | | |
+| Run | IMU yaw rate | Wheel odom | Purpose | filtered Hz | clamped dropped | over gate (est.) | dropout drift (m) | GT RMS filtered (m) | final cov trace (m^2) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | on | on | Baseline | not run | | | | | |
+| B | off | on | Value of the IMU yaw rate | not run | | | | | |
+| C | on | off | Value of the encoders | not run | | | | | |
+| D | on | on, 10 s UWB dropout | Drift under canopy | not run | | | | | |

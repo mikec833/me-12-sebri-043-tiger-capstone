@@ -1,16 +1,23 @@
 # ballrobot_localization_pkg
 
 Position and heading estimate for the Tiger Enrichment Ball Robot. It fuses UWB,
-the BNO085 IMU and the wheel encoders with two `robot_localization` EKFs.
+the BNO085 IMU and the wheel encoders with **one** `robot_localization` EKF, the
+same filter for localization only runs and for navigation (`robot_navigation_pkg`).
 
 This package only adds new nodes. It reads the topics that `ballrobot_pkg`
 already publishes and never edits or restarts those nodes. `DISCOVERY.md` records
 what each existing topic actually contains and why the adapters below exist.
 
-**Status (13 Oct 2026):** the code is written, and the math and the evaluation
+**Status (14 Oct 2026):** the code is written, and the math and the evaluation
 script are tested offline. It has **not yet been built or run under ROS 2**. No
 recorded bag contains UWB data yet, so the comparison table in
 `results/summary.md` is still empty. Section 8 lists what to do first.
+
+**Changed 14 Oct 2026:** the first version ran two EKFs (`ekf_odom` and `ekf_map`)
+and fused magnetometer yaw. The team confirmed the BNO085 yaw is **not**
+magnetometer referenced (it is relative to power on), and asked for one EKF for
+every use. The package now runs a single EKF on `/odometry/filtered`, fuses only
+the IMU yaw rate, and gets absolute heading from an alignment drive (section 5).
 
 ---
 
@@ -63,7 +70,7 @@ one YAML file in `ballrobot_pkg/config/`. Both packages read the same file:
 | Package | How to select it | What it reads |
 | --- | --- | --- |
 | `ballrobot_pkg` | `run_sensors.sh config:=<name>` | Each sensor node reads its own block, e.g. `uwb_node.anchor_positions`. |
-| `ballrobot_localization_pkg` | `localization.launch.py config:=<name>`, `evaluate.py run --config <name>` | `uwb_node.anchor_positions` for the clamp test and the anchor plot, plus optional `uwb_pose_adapter`, `imu_adapter` and `wheel_odom_adapter` blocks. |
+| `ballrobot_localization_pkg` | `localization.launch.py config:=<name>`, `evaluate.py run --config <name>` | `uwb_node.anchor_positions` for the clamp test and the anchor plot, `teensy_interface_node.r_eff` and `b_eff` for the wheel odometry, plus optional `uwb_pose_adapter`, `imu_adapter` and `wheel_odom_adapter` blocks. |
 
 `<name>` is a file in `ballrobot_pkg/config/` without `.yaml`, or a path. Both
 launch files use the same rule. The anchor layout is therefore written down once.
@@ -78,7 +85,7 @@ calibration, add a block to the setup file:
 ```yaml
 imu_adapter:
   ros__parameters:
-    yaw_offset_deg: 37.5      # from evaluate.py on an outdoor bag
+    yaw_sign: -1.0            # if calibrate.py reports a negative b_eff
 ```
 
 After you edit or add a setup file, run `colcon build`, or pass the file by path.
@@ -89,16 +96,15 @@ The code is in `ballrobot_localization_pkg/setup_config.py`.
 ## 2. Node graph and topics
 
 ```
- ballrobot_pkg (unchanged)          ballrobot_localization_pkg                         robot_localization
- ------------------------          ------------------                         ------------------
- uwb_node      /uwb/position  ---> uwb_pose_adapter   /localization/uwb_pose  ---------------> ekf_map
- imu_node      /imu/rpy       -+-> imu_adapter        /localization/imu       ---> ekf_odom + ekf_map
+ ballrobot_pkg (sensors)            ballrobot_localization_pkg                     robot_localization
+ uwb_node      /uwb/position  ---> uwb_pose_adapter   /localization/uwb_pose   ---> ekf  (x, y)
+ imu_node      /imu/rpy       -+-> imu_adapter        /localization/imu        ---> ekf  (vyaw)
                /imu/accel     -+
- teensy_iface  /wheel_states  ---> wheel_odom_adapter /localization/wheel_odom ---> ekf_odom + ekf_map
+ teensy_iface  /wheel_states  ---> wheel_odom_adapter /localization/wheel_odom ---> ekf  (vx, vy, vyaw)
 
- ekf_odom -> /odometry/local  + TF odom -> base_link
- ekf_map  -> /odometry/global + TF map  -> odom
- static_transform_publisher x2 -> TF base_link -> imu_link, base_link -> uwb_tag_link
+ ekf -> /odometry/filtered + TF odom -> base_link       (subscribes /set_pose)
+ static_transform_publisher x3 -> TF map -> odom (identity),
+                                  base_link -> imu_link, base_link -> uwb_tag_link
 ```
 
 | Topic | Type | Frame | Rate | Publisher |
@@ -109,9 +115,9 @@ The code is in `ballrobot_localization_pkg/setup_config.py`.
 | `/wheel_states` | `sensor_msgs/JointState` (rad/s) | empty | 70 to 100 Hz | `ballrobot_pkg/teensy_interface_node` |
 | `/localization/uwb_pose` | `geometry_msgs/PoseWithCovarianceStamped` | `map` | UWB rate minus drops | `uwb_pose_adapter` |
 | `/localization/imu` | `sensor_msgs/Imu` | `imu_link` | 100 Hz | `imu_adapter` |
-| `/localization/wheel_odom` | `nav_msgs/Odometry` (twist only) | `odom` / `base_link` | wheel rate | `wheel_odom_adapter` |
-| `/odometry/local` | `nav_msgs/Odometry` | `odom` / `base_link` | 30 Hz | `ekf_odom` |
-| `/odometry/global` | `nav_msgs/Odometry` | `map` / `base_link` | 30 Hz | `ekf_map` |
+| `/localization/wheel_odom` | `nav_msgs/Odometry` (twist only) | `odom` / `base_link` | 50 Hz | `wheel_odom_adapter` |
+| `/odometry/filtered` | `nav_msgs/Odometry` | `odom` (= `map`) / `base_link` | 30 Hz | `ekf` |
+| `/set_pose` | `geometry_msgs/PoseWithCovarianceStamped` | `odom` | on alignment | `robot_navigation_pkg` |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | | 1 Hz per node | all of the above |
 
 Every adapter copies `header.stamp` from its input unchanged. A message with a zero
@@ -123,14 +129,14 @@ stamp is dropped and logged, never restamped. Each adapter publishes its counter
 ## 3. Frames (REP 105)
 
 ```
-map ──(ekf_map)──> odom ──(ekf_odom)──> base_link ──(static)──> imu_link
-                                                  └─(static)──> uwb_tag_link
+map ──(static identity)──> odom ──(ekf)──> base_link ──(static)──> imu_link
+                                                   └─(static)──> uwb_tag_link
 ```
 
 | Frame | Meaning |
 | --- | --- |
 | `map` | UWB anchor survey frame. Origin and axes are the `anchor_positions` parameter of `uwb_node` (see section 7). |
-| `odom` | Continuous local frame. It drifts but never jumps. |
+| `odom` | The EKF world frame. Identical to `map` (static identity), so positions are UWB map coordinates. |
 | `base_link` | Centre of the inner drivetrain chassis. |
 | `imu_link` | BNO085 mount. The default roll is **pi**, because every bag shows the board reading about 179 deg roll at rest (mounted upside down). |
 | `uwb_tag_link` | UWB tag mount. The offset is published for completeness but not used by the EKF (see the limitations). |
@@ -170,14 +176,15 @@ two September logs this caught 243 of 243 clamped samples, with no false positiv
 | --- | --- | --- | --- |
 | `sync_slop` | 0.005 | s | `/imu/rpy` and `/imu/accel` share a stamp, so this only covers jitter. |
 | `accel_scale` | 9.80665e-3 | m/s^2 per count | The UART-RVC accelerometer reports milli g. At rest it reads about 1010 counts. |
-| `yaw_sign` | 1.0 | | **TODO, verify.** Must make ROS yaw increase when the robot turns counter clockwise. |
-| `yaw_offset_deg` | 0.0 | deg | **TODO, measure.** Rotates magnetic heading onto map +x. `evaluate.py` estimates it. |
-| `roll_variance`, `pitch_variance` | 0.0012 | rad^2 | About 2 deg, the usual figure for BNO085 fused tilt. |
-| `yaw_variance` | 0.03 | rad^2 | About 10 deg. Inflated for magnetometer EMI from the Sabertooth. Tune with runs A and B. |
+| `yaw_sign` | 1.0 | | **TODO, verify.** Sets the sign of the fused yaw rate: a counter clockwise turn must give a positive rate. `calibrate.py` reports a negative `b_eff` when it is wrong. |
+| `yaw_offset_deg` | 0.0 | deg | Shifts the published orientation only. Not fused. |
+| `roll_variance`, `pitch_variance`, `yaw_variance` | 0.0012, 0.0012, 0.03 | rad^2 | Published for completeness. Orientation is not fused. |
 | `derive_angular_velocity` | true | | The RVC frame has no gyro output, so the rate is derived from orientation. |
 | `angular_velocity_window` | 5 | samples | 50 ms at 100 Hz. Lag is about half of that. |
+| `angular_velocity_mode` | world_yaw | | `world_yaw`: d(yaw)/dt, the true heading rate even while the chassis tilts in the shell. `body`: full body rate. |
+| `mount_roll`, `mount_pitch`, `mount_yaw` | pi, 0, 0 | rad | Set by the launch file from `imu_roll` etc., so the rate is expressed through the same mount as the TF. |
 | `angular_velocity_variance` | 0.0025 | (rad/s)^2 | About 3 deg/s. |
-| `linear_acceleration_variance` | 0.25 | (m/s^2)^2 | About 0.5 m/s^2. Only used with `fuse_imu_accel:=true`. |
+| `linear_acceleration_variance` | 0.25 | (m/s^2)^2 | About 0.5 m/s^2. Acceleration is not fused. |
 
 ### wheel_odom_adapter
 
@@ -186,30 +193,31 @@ two September logs this caught 243 of 243 clamped samples, with no false positiv
 | `input_units` | rad_s | | The XIAO firmware already converts counts to rad/s at the gearbox output. |
 | `counts_per_rev` | 4480 | counts | Pololu #2825, 64 CPR x 70:1 (firmware constant). Only used for `counts_per_s` input. |
 | `left_sign`, `right_sign` | 1.0 | | **TODO, verify.** Both wheels must read positive when driving forward. |
-| `k_v` | 1.0 | | Shell slip and wheel-to-shell geometry. Fit it from straight runs against UWB. |
-| `wheel_radius` | 0.072 | m | `cmd_vel_bridge.py` default. |
-| `b_eff` | 0.22 | m | `cmd_vel_bridge.py` wheel base and the CAD track width. Fit it from spins against IMU yaw. |
-| `var_vx` | 0.01 | (m/s)^2 | Starting guess. |
-| `var_vy` | 0.1 | (m/s)^2 | Loose on purpose, because the ball slips sideways on grass. |
-| `var_vz` | 0.01 | (m/s)^2 | Ground robot constraint. |
-| `var_wz` | 0.04 | (rad/s)^2 | Starting guess. |
+| `k_v` | 1.0 | | Extra slip factor. Leave at 1 once `r_eff` is calibrated against UWB. |
+| `wheel_radius` | 0.072 | m | Fallback. Normally `teensy_interface_node.r_eff` from the shared setup file (`calibrate.py`). |
+| `b_eff` | 0.22 | m | Fallback. Normally `teensy_interface_node.b_eff` from the shared setup file. |
+| `var_vx` | 0.05 | (m/s)^2 | Navigation brief starting value. |
+| `var_vy` | 0.001 | (m/s)^2 | Tight: the v_y = 0 constraint keeps heading observable between UWB fixes. |
+| `var_vz` | 0.01 | (m/s)^2 | Unused in two_d_mode. |
+| `var_wz` | 0.1 | (rad/s)^2 | Loose: shell slip makes the wheel yaw rate unreliable. |
+| `output_rate_hz` | 50 | Hz | Wheel rates are averaged and published at this rate to save CPU. |
 
 Kinematics: `v_x = k_v r (w_L + w_R) / 2`, `v_y = 0`, `v_z = 0`,
 `w_z = k_v r (w_R - w_L) / b_eff`.
 
-### EKFs (`config/ekf.yaml`)
+### EKF (`config/ekf.yaml`)
 
-| Setting | ekf_odom | ekf_map |
-| --- | --- | --- |
-| `world_frame` | odom | map |
-| `frequency` | 30 Hz | 30 Hz |
-| `imu0_config` | roll, pitch, vyaw | roll, pitch, yaw (`fuse_imu_yaw`), vyaw |
-| `odom0_config` | vx, vy, vz, vyaw | vx, vy, vz, vyaw |
-| `pose0_config` | | x, y, z |
-| `pose0_rejection_threshold` | | 3.37 (99%, 3 DOF) |
-| `imu0_twist_rejection_threshold` | | 2.58 (99%, 1 DOF, vyaw only) |
-| `odom0_twist_rejection_threshold` | | 3.64 (99%, 4 DOF) |
-| `initial_estimate_covariance` | 1e-3 everywhere | position 1.0 m^2, angles 0.1 to 1.0 rad^2, rates 1e-3 |
+| Setting | Value |
+| --- | --- |
+| node name | `ekf` (subscribes `/set_pose`) |
+| `world_frame` | odom (static identity to map) |
+| `frequency`, `sensor_timeout` | 30 Hz, 0.2 s |
+| `two_d_mode` | true |
+| `imu0_config` | vyaw only |
+| `odom0_config` | vx, vy, vyaw |
+| `pose0_config` | x, y |
+| `pose0_rejection_threshold` | 5.0 (2 DOF; well past the 99 % value of 3.03, so a briefly over confident filter still accepts good fixes) |
+| `initial_estimate_covariance` | position 1.0 m^2, yaw pi^2 (unknown until alignment), rates 1e-3 |
 
 The process noise is the 15 x 15 diagonal from the task brief: position 0.01,
 roll and pitch 0.01, yaw 0.02, vx and vy 0.05, vz 0.01, vroll and vpitch 0.01,
@@ -221,9 +229,8 @@ inflated because the filter has no IMU bias states.
 | Argument | Default | Effect |
 | --- | --- | --- |
 | `use_sim_time` | false | Set to true by `offline.launch.py`. |
-| `two_d_mode` | false | `robot_localization` two_d_mode in both EKFs. |
-| `fuse_imu_yaw` | true | Absolute IMU yaw in `ekf_map`. Yaw is never fused in `ekf_odom`. |
-| `fuse_imu_accel` | false | IMU ax, ay, az in both EKFs, with gravity removed by `robot_localization`. |
+| `two_d_mode` | true | `robot_localization` two_d_mode. |
+| `use_imu` | true | false clears `imu0_config` (run B). |
 | `use_wheel_odom` | true | false clears `odom0_config` (run C). |
 | `uwb_dropout` | empty | `start,end[,...]` seconds; overrides `dropout_windows` (run D). |
 | `config` | default | Shared setup file: a name in `ballrobot_pkg/config/` or a path (section 1a). |
@@ -231,25 +238,27 @@ inflated because the filter has no IMU bias states.
 
 ---
 
-## 5. Why the IMU is used this way
+## 5. How heading is found, and why the IMU is used this way
 
 `imu_node` runs the BNO085 in **UART-RVC** mode. Each frame contains roll, pitch and
-yaw from the chip's own fusion (magnetometer included) plus the raw accelerometer.
-There is no gyro output and no gravity-free linear acceleration. Given that, the
-most robust use is:
+yaw from the chip's own fusion plus the raw accelerometer. There is no gyro output
+and no gravity-free linear acceleration, and the yaw is relative to power on (the
+team confirmed it does not use the magnetometer; in testing it is reliable). So:
 
-* **Roll and pitch:** fused as absolute values in both EKFs. They are gravity
-  referenced and unaffected by the magnetometer.
-* **Yaw:** absolute yaw only in `ekf_map`, with an inflated variance. `ekf_odom`
-  never uses absolute yaw, so an EMI jump can't make `odom` jump.
-* **Yaw rate:** derived from consecutive fused orientations, and fused as vyaw in
-  both EKFs. This adds a second yaw rate source next to the wheels, which matters
-  when the shell slips.
-* **Acceleration:** off by default. The signal still contains gravity, so a 1 deg
-  tilt error leaks 0.17 m/s^2 into ax or ay, and the filter has no bias states to
-  absorb that. The Sphero-style chassis also swings in pitch (-23 to +39 deg in the
-  8 Oct drive). Wheel odometry already measures velocity at up to 100 Hz. Turn it
-  on with `fuse_imu_accel:=true` to test it.
+* **Yaw rate only.** The adapter derives d(yaw)/dt from the fused yaw and the EKF
+  fuses that as vyaw. Unlike the body z rate, this is the true heading rate while
+  the chassis pitches inside the shell (-23 to +39 deg in the 8 Oct drive, which
+  would put the body rate up to 29 % off).
+* **No orientation.** IMU yaw has an arbitrary zero, and roll and pitch do not
+  matter in two_d_mode.
+* **No acceleration.** It still contains gravity, the shell vibrates, and the
+  filter has no bias states. Wheel odometry already gives velocity.
+* **Absolute heading from an alignment drive.** UWB gives position only. The robot
+  drives straight for about 1.5 m, a line is fitted through the UWB fixes, and the
+  heading is sent to the EKF on `/set_pose` (`robot_navigation_pkg` `align_heading`,
+  or the ALIGN state of `go_to_goal`). After that the EKF integrates the yaw rate,
+  and heading stays weakly observable through v_y = 0 plus UWB. Before alignment
+  the yaw variance is pi^2: positions are right, heading is not.
 
 ---
 
@@ -273,16 +282,16 @@ run, and `results/summary.md` for the comparison. It reports:
 * UWB samples dropped as clamped (from the adapter's `/diagnostics` counters).
 * UWB rejections. `robot_localization` does not report rejected measurements on
   `/diagnostics`, even with `print_diagnostics: true`. The script lists any
-  `ekf_map` diagnostics that mention rejection, and also **estimates** which samples
-  failed the 3.37 gate. It does this by comparing each UWB sample with the last
-  `/odometry/global` estimate before it. To see the filter's own decisions, set
-  `debug: true` in `ekf.yaml` and read its debug file.
-* The global XY error against UWB at the start and end of each dropout window.
-* RMS error of raw UWB and of `/odometry/global` against a ground truth CSV with
+  EKF diagnostics that mention rejection, and also **estimates** which samples
+  failed the 5.0 gate. It does this by comparing each UWB sample with the last
+  `/odometry/filtered` estimate before it, over x and y. To see the filter's own
+  decisions, set `debug: true` in `ekf.yaml` and read its debug file.
+* The filtered XY error against UWB at the start and end of each dropout window.
+* RMS error of raw UWB and of `/odometry/filtered` against a ground truth CSV with
   columns `t,x,y`. `t` is either absolute stamp seconds or seconds after the first
   UWB sample.
-* A suggested `yaw_offset_deg`, from UWB track heading against IMU yaw while
-  driving forward.
+* The offset between raw IMU yaw and the UWB track heading while driving forward.
+  It is a diagnostic: a steady value means alignment and the IMU agree.
 * A yaw rate sign check between the IMU and the wheels. A negative slope means
   `yaw_sign` or a wheel sign is wrong.
 
@@ -294,7 +303,10 @@ same script will run.
 ## 7. Known limitations
 
 * **No IMU bias states.** `robot_localization` has no bias states, so the process
-  noise is inflated instead. Slow orientation bias shows up as error.
+  noise is inflated instead. Slow yaw rate bias shows up as heading drift between
+  alignments.
+* **Heading needs an alignment drive** after every start (and after a long UWB
+  outage). The drive direction is unknown, so start the robot facing open ground.
 * **UWB tag lever arm ignored.** `robot_localization` does not apply a lever arm to a
   `PoseWithCovarianceStamped` given in the world frame, so the offset from
   `base_link` to the tag is assumed negligible. The ball rolls, so if the tag is
@@ -303,9 +315,6 @@ same script will run.
   exactly 1.3 m, so the solution can't tell above from below the plane
   (`tag_below_anchor_plane` decides). Clamped samples are dropped and z gets a large
   variance.
-* **Magnetometer EMI.** The Sabertooth motor driver disturbs the BNO085 heading while
-  the motors are loaded. Run B (`fuse_imu_yaw:=false`) measures how much that
-  matters.
 * **Three anchors is the minimum.** Three anchors give exactly one solution, with no
   redundancy to reject a bad range, and geometry that degrades fast near the edges.
   A 40 m x 25 m enclosure with canopy and steel mesh needs at least 4, and better 6
@@ -346,8 +355,10 @@ same script will run.
    check in `evaluate.py` must report a positive slope. Earlier data hints at a
    possible mismatch: the only real drive (8 Oct, 17:00) shows a weak negative
    correlation between IMU and wheel yaw rate.
-5. Set `yaw_offset_deg` from the evaluate suggestion. Fit `k_v` and `b_eff`.
-6. Run `run_comparison.sh` and tune the variances.
+5. Run the drive calibration (`robot_navigation_pkg`: `calibration_drive`, then
+   `scripts/calibrate.py`) and paste `r_eff`, `b_eff`, `p0`, `kp` into the setup file.
+   Both the drive and the wheel odometry read them from there.
+6. Run an alignment drive, then `run_comparison.sh`, and tune the variances.
 
 ---
 
@@ -360,6 +371,8 @@ same script will run.
   anchor). This handles 2 out of 3 anchors, rejects single bad ranges, and avoids
   the clamping problem altogether.
 * **Bias states** for gyro-derived yaw rate and accelerometer, in a custom filter.
+* **A second EKF** (dual `map` and `odom` instances) if a continuous, never-jumping
+  `odom` frame is needed later; it costs another filter on the Pi 3.
 * **An elevated anchor**, or anchors at clearly different heights, to make z
   observable.
 * **SHTP mode on the BNO085** instead of UART-RVC, to get the real gyro,

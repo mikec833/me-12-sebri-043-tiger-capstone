@@ -84,9 +84,10 @@ point to plane test if the anchors are ever mounted at different heights.
   scale is 9.80665e-3 m/s^2 per count and gravity is present.
 * Roll about +179 deg at rest: sensor z axis points down. The `base_link` to `imu_link`
   static TF needs a 180 deg roll, not zero, once measured.
-* RVC yaw is the BNO085 fused heading with the magnetometer included (confirmed by
-  the team, 13 Oct 2026). It is absolute but needs `yaw_offset_deg` to align
-  magnetic heading with map +x, and the EMI concern applies.
+* RVC yaw: on 13 Oct the team first described it as magnetometer fused. On 14 Oct
+  they corrected this: it does **not** use the magnetometer and has tested
+  reliable, so yaw is relative to power on. The single EKF therefore fuses only
+  the yaw rate and gets heading from an alignment drive.
 * The only real drive in the bags (8 Oct, 17:00) shows a weak negative correlation
   (r about -0.17) between IMU yaw rate and wheel yaw rate `r (w_R - w_L)`. Too weak
   to change defaults, but `yaw_sign` and the wheel signs must be checked on the
@@ -97,7 +98,7 @@ point to plane test if the anchors are ever mounted at different heights.
 | Item | Decision |
 | --- | --- |
 | C1 clamped | Inferred in `uwb_pose_adapter` from distance to the anchor plane. No edit needed. |
-| C2, C3 IMU | Use the fused roll, pitch, yaw. Derive yaw rate from orientation. Scale accel to m/s^2 and let `robot_localization` remove gravity, but leave accel fusion off by default. |
+| C2, C3 IMU | Derive the heading rate from the fused yaw and fuse only that (14 Oct: single EKF, relative yaw). Orientation and acceleration are published but not fused. |
 | C5 timestamp | Documented in README limitations. No change to the existing reader. |
 | C6 anchors | Since PR #3 the anchors live in shared setup files, `ballrobot_pkg/config/<name>.yaml` (`default`, `outdoor`). The localization launch reads the same file (`config:=<name>`), so the layout exists once. |
 | C7, C8 | Package built to run on the Pi. Comparison table pending a bag with UWB. |

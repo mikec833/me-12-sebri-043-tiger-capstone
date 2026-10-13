@@ -39,14 +39,13 @@ except ImportError:  # only needed to read anchors from adapters.yaml
 TOPICS = {
     'uwb_raw': '/uwb/position',
     'uwb_pose': '/localization/uwb_pose',
-    'local': '/odometry/local',
-    'global': '/odometry/global',
+    'global': '/odometry/filtered',   # single EKF output (map = odom)
     'diag': '/diagnostics',
     'rpy': '/imu/rpy',
     'wheel': '/localization/wheel_odom',
     'imu': '/localization/imu',
 }
-POSE_GATE = 3.37  # must match pose0_rejection_threshold in config/ekf.yaml
+POSE_GATE = 5.0  # must match pose0_rejection_threshold in config/ekf.yaml (x, y)
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ADAPTERS = os.path.join(HERE, '..', 'config', 'adapters.yaml')
 
@@ -176,11 +175,11 @@ def adapter_counters(diag_msgs):
 
 
 def ekf_reject_messages(diag_msgs):
-    """robot_localization /diagnostics entries from ekf_map that mention rejection."""
+    """robot_localization /diagnostics entries from the EKF that mention rejection."""
     hits = []
     for m in diag_msgs:
         for s in m.status:
-            if 'ekf_map' not in s.name:
+            if 'ekf' not in s.name:
                 continue
             text = (s.message + ' ' + ' '.join(f'{kv.key}={kv.value}' for kv in s.values))
             if 'reject' in text.lower():
@@ -190,7 +189,8 @@ def ekf_reject_messages(diag_msgs):
 
 def estimated_rejections(uwb_pose_msgs, glob):
     """Mahalanobis distance of each fused UWB sample against the last
-    /odometry/global estimate stamped before it.
+    /odometry/filtered estimate stamped before it, over x and y (the fused
+    UWB axes).
 
     This is an outside estimate of what pose0_rejection_threshold rejects:
     robot_localization gates against its predicted state at the exact sample
@@ -206,7 +206,8 @@ def estimated_rejections(uwb_pose_msgs, glob):
             continue
         r = np.array([m.pose.pose.position.x, m.pose.pose.position.y,
                       m.pose.pose.position.z]) - glob['xyz'][i]
-        s = glob['cov'][i][:3, :3] + np.asarray(m.pose.covariance, dtype=float).reshape(6, 6)[:3, :3]
+        r = r[:2]
+        s = glob['cov'][i][:2, :2] + np.asarray(m.pose.covariance, dtype=float).reshape(6, 6)[:2, :2]
         try:
             d = float(math.sqrt(r @ np.linalg.solve(s, r)))
         except np.linalg.LinAlgError:
@@ -219,12 +220,12 @@ def estimated_rejections(uwb_pose_msgs, glob):
 
 
 def dropout_drift(windows, t_ref, uwb, glob):
-    """/odometry/global error against UWB at the start and end of each window.
+    """/odometry/filtered error against UWB at the start and end of each window.
 
     End error: the last global estimate stamped before the window ends
     against the first fused UWB sample after it (clamped samples are never
     in uwb_pose). Start error is the same measure going into the window, as
-    a baseline. /odometry/local is not compared: it lives in the odom frame.
+    a baseline.
     """
     rows = []
     if uwb is None or glob is None:
@@ -273,7 +274,8 @@ def ground_truth_rms(path, t_ref, uwb, glob):
 
 
 def yaw_offset_estimate(uwb_pose, rpy_msgs, wheel_msgs, yaw_sign):
-    """Suggest imu_adapter yaw_offset_deg from UWB track heading.
+    """Offset between raw IMU yaw and UWB track heading (diagnostic: the single
+    EKF does not fuse IMU yaw; a steady offset means alignment is consistent).
 
     Uses pairs of fused UWB samples about 2 s apart that are at least 0.5 m
     apart while the wheels report forward motion, and compares the track
@@ -351,7 +353,7 @@ def plot_xy(out_dir, uwb, local, glob, anchors, label):
                 label='/odometry/local (odom frame)')
     if glob is not None:
         ax.plot(glob['xyz'][:, 0], glob['xyz'][:, 1], color=COLORS['global'], lw=1.6,
-                label='/odometry/global (map frame)')
+                label='/odometry/filtered')
     if anchors is not None:
         ax.scatter(anchors[:, 0], anchors[:, 1], marker='^', s=80, color=COLORS['anchor'],
                    label='UWB anchors', zorder=5)
@@ -375,20 +377,20 @@ def plot_time(out_dir, t_ref, uwb, local, glob, windows, label):
         if local is not None:
             ax.plot(local['t'] - t_ref, local['xyz'][:, i], color=COLORS['local'], lw=1, label='local')
         if glob is not None:
-            ax.plot(glob['t'] - t_ref, glob['xyz'][:, i], color=COLORS['global'], lw=1.3, label='global')
+            ax.plot(glob['t'] - t_ref, glob['xyz'][:, i], color=COLORS['global'], lw=1.3, label='filtered')
         ax.set_ylabel(f'{axis} (m)')
         ax.grid(alpha=0.3)
     if glob is not None:
         axes[3].plot(glob['t'] - t_ref, glob['trace'], color=COLORS['global'])
         axes[3].set_yscale('log')
-    axes[3].set_ylabel('global cov trace\nxx+yy+zz (m^2)')
+    axes[3].set_ylabel('filtered cov trace\nxx+yy+zz (m^2)')
     axes[3].grid(alpha=0.3)
     axes[3].set_xlabel('time since first UWB sample (s)')
     for ax in axes:
         for start, end in windows:
             ax.axvspan(start, end, color=COLORS['dropout'], alpha=0.15)
     axes[0].legend(loc='upper right', fontsize=8, ncol=3)
-    axes[0].set_title(f'Position and global covariance, run {label}')
+    axes[0].set_title(f'Position and filtered covariance, run {label}')
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, 'position_time.png'), dpi=130)
     plt.close(fig)
@@ -401,7 +403,7 @@ def run(args):
     data = read_bag(args.bag)
     uwb = point_series(data['uwb_raw'])
     uwb_pose = point_series(data['uwb_pose'], pose=True)
-    local = odom_series(data['local'])
+    local = None  # single EKF: no separate odom-frame output
     glob = odom_series(data['global'])
     windows = parse_windows(args.dropout)
     # Same reference as uwb_pose_adapter 'relative' dropout windows.
@@ -418,13 +420,13 @@ def run(args):
         'label': args.label,
         'bag': os.path.abspath(args.bag),
         'rates_hz': {'uwb_raw': rate_hz(uwb), 'uwb_pose': rate_hz(uwb_pose),
-                     'local': rate_hz(local), 'global': rate_hz(glob)},
+                     'filtered': rate_hz(glob)},
         'adapter_counters': counters,
         'uwb_clamped_dropped': uwb_c.get('dropped_clamped'),
         'uwb_clamped_pct': (100.0 * uwb_c['dropped_clamped'] / received
                             if received and 'dropped_clamped' in uwb_c else None),
-        'ekf_map_reject_diagnostics': ekf_reject_messages(data['diag']),
-        'ekf_map_estimated_rejections': estimated_rejections(data['uwb_pose'], glob),
+        'ekf_reject_diagnostics': ekf_reject_messages(data['diag']),
+        'ekf_estimated_rejections': estimated_rejections(data['uwb_pose'], glob),
         'dropout_drift': dropout_drift(windows, t_ref, uwb_pose or uwb, glob),
         'yaw_offset': yaw_offset_estimate(uwb_pose, data['rpy'], data['wheel'], args.yaw_sign),
         'yaw_rate_check': yaw_rate_check(data['imu'], data['wheel'], args.imu_roll),
@@ -457,15 +459,15 @@ def run_markdown(m):
     lines += [f'| {k} | {fmt(v, 1)} |' for k, v in r.items()]
     lines += ['', f"UWB samples dropped as clamped: {fmt(m['uwb_clamped_dropped'])} "
                   f"({fmt(m['uwb_clamped_pct'], 1)}%)", '']
-    est = m['ekf_map_estimated_rejections']
+    est = m['ekf_estimated_rejections']
     if est:
         lines.append(f"UWB samples over the {POSE_GATE} gate (estimated, see README): "
                      f"{len(est['over_gate'])} of {est['checked']}, median distance "
                      f"{fmt(est['median_distance'], 2)}")
-    lines.append(f"ekf_map /diagnostics entries mentioning rejection: "
-                 f"{len(m['ekf_map_reject_diagnostics'])}")
+    lines.append(f"EKF /diagnostics entries mentioning rejection: "
+                 f"{len(m['ekf_reject_diagnostics'])}")
     for d in m['dropout_drift']:
-        lines.append(f"Dropout {d['window']} s: global XY error {fmt(d['global_xy_drift_m'])} m "
+        lines.append(f"Dropout {d['window']} s: filtered XY error {fmt(d['global_xy_drift_m'])} m "
                      f"at the end (was {fmt(d['global_xy_error_start_m'])} m going in)")
     if m.get('ground_truth'):
         g = m['ground_truth']
@@ -473,7 +475,7 @@ def run_markdown(m):
                      f"{fmt(g.get('uwb_raw_rms_m'))} m, global {fmt(g.get('global_rms_m'))} m")
     y = m.get('yaw_offset')
     if y and 'suggested_yaw_offset_deg' in y:
-        lines.append(f"Suggested imu_adapter yaw_offset_deg: {y['suggested_yaw_offset_deg']:.1f} "
+        lines.append(f"IMU yaw minus UWB track heading: {y['suggested_yaw_offset_deg']:.1f} deg "
                      f"(circular std {y['circular_std_deg']:.1f} deg, {y['segments']} segments)")
     yc = m.get('yaw_rate_check')
     if yc and 'imu_over_wheel_slope' in yc:
@@ -485,32 +487,32 @@ def run_markdown(m):
 
 
 RUNS = [
-    ('A', 'true', 'on', 'Baseline'),
-    ('B', 'false', 'on', 'Effect of magnetometer EMI'),
-    ('C', 'true', 'off', 'Value of the encoders'),
-    ('D', 'true', 'on, 10 s UWB dropout', 'Drift under canopy'),
+    ('A', 'on', 'on', 'Baseline'),
+    ('B', 'off', 'on', 'Value of the IMU yaw rate'),
+    ('C', 'on', 'off', 'Value of the encoders'),
+    ('D', 'on', 'on, 10 s UWB dropout', 'Drift under canopy'),
 ]
 
 
 def summarize(args):
-    rows = ['| Run | fuse_imu_yaw | Wheel odom | Purpose | global Hz | local Hz | '
-            'clamped dropped | over gate (est.) | dropout drift global (m) | '
-            'GT RMS global (m) | final cov trace (m^2) |',
-            '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+    rows = ['| Run | IMU yaw rate | Wheel odom | Purpose | filtered Hz | '
+            'clamped dropped | over gate (est.) | dropout drift (m) | '
+            'GT RMS filtered (m) | final cov trace (m^2) |',
+            '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
     figures = []
     for label, yaw, odom, purpose in RUNS:
         path = os.path.join(args.results, f'run_{label}', 'metrics.json')
         if not os.path.exists(path):
-            rows.append(f'| {label} | {yaw} | {odom} | {purpose} | not run | | | | | | |')
+            rows.append(f'| {label} | {yaw} | {odom} | {purpose} | not run | | | | | |')
             continue
         with open(path) as f:
             m = json.load(f)
-        est = m.get('ekf_map_estimated_rejections') or {}
+        est = m.get('ekf_estimated_rejections') or {}
         drift = [d.get('global_xy_drift_m') for d in m.get('dropout_drift', [])]
         gt = (m.get('ground_truth') or {}).get('global_rms_m')
         rows.append(
-            f"| {label} | {yaw} | {odom} | {purpose} | {fmt(m['rates_hz']['global'], 1)} | "
-            f"{fmt(m['rates_hz']['local'], 1)} | {fmt(m.get('uwb_clamped_dropped'))} "
+            f"| {label} | {yaw} | {odom} | {purpose} | {fmt(m['rates_hz']['filtered'], 1)} | "
+            f"{fmt(m.get('uwb_clamped_dropped'))} "
             f"({fmt(m.get('uwb_clamped_pct'), 1)}%) | "
             f"{len(est.get('over_gate', [])) if est else 'n/a'} | "
             f"{', '.join(fmt(d, 2) for d in drift) or 'n/a'} | {fmt(gt)} | "

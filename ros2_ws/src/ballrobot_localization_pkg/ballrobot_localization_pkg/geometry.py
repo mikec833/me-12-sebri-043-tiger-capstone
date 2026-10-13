@@ -70,6 +70,19 @@ def body_angular_velocity(q_prev: Quat, q_curr: Quat, dt: float) -> Optional[Vec
     return (dq[0] * scale, dq[1] * scale, dq[2] * scale)
 
 
+def rotate_vector(q: Quat, v: Vec3) -> Vec3:
+    """Rotate v by unit quaternion q (q v q*)."""
+    p = quat_multiply(quat_multiply(q, (v[0], v[1], v[2], 0.0)), quat_conjugate(q))
+    return (p[0], p[1], p[2])
+
+
+def world_yaw_rate_in_sensor(yaw_rate: float, mount: Quat) -> Vec3:
+    """Sensor frame vector that the static mount maps to (0, 0, yaw_rate) in
+    base_link. mount is the base_link to imu_link rotation (the static TF), so
+    v_base = mount * v_imu and v_imu = mount^-1 * v_base."""
+    return rotate_vector(quat_conjugate(mount), (0.0, 0.0, yaw_rate))
+
+
 # covariance
 
 def diagonal_covariance(variances: Sequence[float]) -> List[float]:

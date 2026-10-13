@@ -1,0 +1,11 @@
+# Navigation parameters. Values are starting points from the navigation
+# brief; tune on the ground and record a bag per trial.
+
+align_heading:
+  ros__parameters:
+    v_align: 0.15             # m/s, straight alignment drive
+    d_align: 1.5              # m, by wheel odometry
+    align_min_length: 1.0     # m, accept the fit only if the UWB path is longer
+    align_max_rms: 0.15       # m, and the line fit residual is smaller
+    align_yaw_variance: 0.05  # rad^2, sent to the EKF with the heading
+    set_pose_topic: /set_pose

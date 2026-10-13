@@ -6,7 +6,7 @@ into one sensor_msgs/Imu for robot_localization.
 
 Subscribes
     /imu/rpy      geometry_msgs/Vector3Stamped   roll, pitch, yaw in degrees
-                  (fused on the BNO085, magnetometer included)
+                  (BNO085 UART-RVC fusion; yaw relative to power on)
     /imu/accel    geometry_msgs/Vector3Stamped   accelerometer, raw counts
                   (milli g, gravity included)
 Publishes
@@ -18,13 +18,23 @@ they are paired with message_filters ApproximateTime (slop sync_slop).
 
 Orientation: quaternion from the RVC Euler angles (ZYX, as in
 imu_quaternion_node.py), after yaw = yaw_sign * yaw + yaw_offset_deg.
-yaw_offset_deg aligns magnetic heading with the map x axis.
+The RVC yaw is relative to power on (no magnetometer, confirmed by the
+team), so the single EKF does not fuse orientation; it fuses only the yaw
+rate below.
 
-Angular velocity: the RVC frame has no gyro output. When
-derive_angular_velocity is true it is computed from the rotation between
-the current orientation and the one angular_velocity_window samples
-earlier, expressed in the sensor frame. This lags the true rate by about
-half the window. With it off, angular_velocity_covariance[0] is -1.
+Angular velocity: the RVC frame has no gyro output, so with
+derive_angular_velocity true the rate is computed over
+angular_velocity_window samples (lag about half the window). Two modes:
+  world_yaw (default)  d(yaw)/dt of the fused Euler yaw, the true heading
+                       rate of the chassis even while it pitches or rolls
+                       inside the shell. Published as the sensor frame
+                       vector that the static mount (mount_roll, mount_pitch,
+                       mount_yaw, the same angles as the base_link to imu_link
+                       TF) maps to (0, 0, yaw rate) in base_link.
+  body                 full body rate from the rotation between the two
+                       orientations. Its z component differs from the
+                       heading rate whenever the chassis is tilted.
+With derive_angular_velocity false, angular_velocity_covariance[0] is -1.
 
 Linear acceleration: counts times accel_scale (m/s^2 per count). Gravity
 is still present, so the EKF must run with
@@ -32,12 +42,13 @@ imu0_remove_gravitational_acceleration: true.
 
 Covariance: the source carries none, so every block is filled from
 parameters. yaw_variance replaces only the yaw element of the orientation
-covariance, to allow for magnetometer EMI from the motor driver.
+covariance (orientation is published for completeness but not fused).
 
 The source header.stamp is copied unchanged. Zero stamps are dropped and
 reported.
 """
 
+import math
 from collections import deque
 
 import rclpy
@@ -49,7 +60,8 @@ from sensor_msgs.msg import Imu
 
 from ballrobot_localization_pkg.counters import CounterPublisher, stamp_is_zero, stamp_to_sec
 from ballrobot_localization_pkg.geometry import (
-    body_angular_velocity, diagonal_covariance, euler_deg_to_quaternion)
+    body_angular_velocity, diagonal_covariance, euler_deg_to_quaternion,
+    world_yaw_rate_in_sensor)
 
 
 class ImuAdapter(Node):
@@ -70,6 +82,12 @@ class ImuAdapter(Node):
         self.declare_parameter('yaw_variance', 0.03)
         self.declare_parameter('derive_angular_velocity', True)
         self.declare_parameter('angular_velocity_window', 5)
+        self.declare_parameter('angular_velocity_mode', 'world_yaw')
+        # base_link to imu_link rotation, rad. localization.launch.py passes
+        # the same values it gives the static TF.
+        self.declare_parameter('mount_roll', math.pi)
+        self.declare_parameter('mount_pitch', 0.0)
+        self.declare_parameter('mount_yaw', 0.0)
         self.declare_parameter('angular_velocity_variance', 0.0025)
         self.declare_parameter('linear_acceleration_variance', 0.25)
 
@@ -80,6 +98,13 @@ class ImuAdapter(Node):
         self._yaw_offset = float(p('yaw_offset_deg').value)
         self._derive_w = bool(p('derive_angular_velocity').value)
         self._history = deque(maxlen=max(2, int(p('angular_velocity_window').value) + 1))
+        self._w_mode = p('angular_velocity_mode').value
+        if self._w_mode not in ('world_yaw', 'body'):
+            raise ValueError(f"angular_velocity_mode must be 'world_yaw' or 'body', got {self._w_mode}")
+        self._mount = euler_deg_to_quaternion(*(math.degrees(p(f'mount_{k}').value)
+                                                for k in ('roll', 'pitch', 'yaw')))
+        self._yaw_unwrapped = None   # rad, continuous
+        self._last_yaw_deg = None
 
         self._orientation_cov = diagonal_covariance([
             p('roll_variance').value, p('pitch_variance').value, p('yaw_variance').value])
@@ -128,15 +153,25 @@ class ImuAdapter(Node):
         out.linear_acceleration_covariance = self._accel_cov
 
         if self._derive_w:
+            if self._last_yaw_deg is None:
+                self._yaw_unwrapped = math.radians(yaw)
+            else:
+                step = (yaw - self._last_yaw_deg + 180.0) % 360.0 - 180.0
+                self._yaw_unwrapped += math.radians(step)
+            self._last_yaw_deg = yaw
             if self._history and t <= self._history[-1][0]:
                 # Out of order or repeated stamp: restart the window.
                 self._history.clear()
-            self._history.append((t, q))
+            self._history.append((t, q, self._yaw_unwrapped))
             if len(self._history) < self._history.maxlen:
                 c.inc('dropped_window_fill')
                 return
-            t_old, q_old = self._history[0]
-            w = body_angular_velocity(q_old, q, t - t_old)
+            t_old, q_old, yaw_old = self._history[0]
+            if self._w_mode == 'world_yaw':
+                w = world_yaw_rate_in_sensor((self._yaw_unwrapped - yaw_old) / (t - t_old),
+                                             self._mount)
+            else:
+                w = body_angular_velocity(q_old, q, t - t_old)
             out.angular_velocity.x, out.angular_velocity.y, out.angular_velocity.z = w
             out.angular_velocity_covariance = self._angular_cov
         else:

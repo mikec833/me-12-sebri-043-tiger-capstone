@@ -1,5 +1,8 @@
 """
-Localization stack: three adapters, two static TFs, ekf_odom and ekf_map.
+Localization stack: three adapters, static TFs and one EKF (config/ekf.yaml).
+
+TF tree: map -(static identity)-> odom -(ekf)-> base_link -(static)->
+{imu_link, uwb_tag_link}. The EKF publishes /odometry/filtered.
 
 Does not start any ballrobot_pkg sensor node. Run those with
 ballrobot_pkg/bringup.launch.py (live) or replay them from a bag
@@ -7,10 +10,9 @@ ballrobot_pkg/bringup.launch.py (live) or replay them from a bag
 
 Launch arguments
     use_sim_time      false   true when replaying a bag with --clock
-    two_d_mode        false   robot_localization two_d_mode for both EKFs
-    fuse_imu_yaw      true    fuse absolute IMU yaw in ekf_map
-    fuse_imu_accel    false   fuse IMU linear acceleration in both EKFs
-    use_wheel_odom    true    false clears odom0_config in both EKFs (run C)
+    two_d_mode        true    robot_localization two_d_mode
+    use_imu           true    false clears imu0_config (comparison run B)
+    use_wheel_odom    true    false clears odom0_config (comparison run C)
     uwb_dropout       ''      'start,end[,start,end...]' seconds, overrides
                               the uwb_pose_adapter dropout_windows (run D)
     config            default shared setup file, same argument as
@@ -19,7 +21,9 @@ Launch arguments
                               anchor layout and optional adapter overrides
                               (see ballrobot_localization_pkg/setup_config.py)
     adapters_config, ekf_config   parameter file paths
-    imu_x/y/z/roll/pitch/yaw, uwb_x/y/z   base_link offsets (m, rad)
+    imu_x/y/z/roll/pitch/yaw, uwb_x/y/z   base_link offsets (m, rad). The IMU
+                              rotation is also given to imu_adapter, which
+                              needs it to express the yaw rate correctly.
 """
 
 import os
@@ -34,8 +38,6 @@ from launch_ros.actions import Node
 from ballrobot_localization_pkg import setup_config
 
 PKG = 'ballrobot_localization_pkg'
-IMU_YAW = 5
-IMU_ACCEL = (12, 13, 14)
 
 # Static TF defaults, metres and radians, base_link to sensor.
 # TODO: measure all offsets on the robot.
@@ -52,21 +54,14 @@ def _bool(context, name):
     return LaunchConfiguration(name).perform(context).strip().lower() in ('true', '1', 'yes')
 
 
-def _ekf_params(context, ekf_file, node_name):
+def _ekf_params(context, ekf_file):
     with open(ekf_file) as f:
-        params = dict(yaml.safe_load(f)[node_name]['ros__parameters'])
+        params = dict(yaml.safe_load(f)['ekf']['ros__parameters'])
 
     params['use_sim_time'] = _bool(context, 'use_sim_time')
     params['two_d_mode'] = _bool(context, 'two_d_mode')
-
-    imu_cfg = list(params['imu0_config'])
-    if node_name == 'ekf_map':
-        imu_cfg[IMU_YAW] = _bool(context, 'fuse_imu_yaw')
-    if not _bool(context, 'fuse_imu_accel'):
-        for i in IMU_ACCEL:
-            imu_cfg[i] = False
-    params['imu0_config'] = imu_cfg
-
+    if not _bool(context, 'use_imu'):
+        params['imu0_config'] = [False] * 15
     if not _bool(context, 'use_wheel_odom'):
         params['odom0_config'] = [False] * 15
     return params
@@ -88,6 +83,9 @@ def _launch_setup(context, *args, **kwargs):
     log = LogInfo(msg=f'Setup config: {setup_file}, UWB anchors: {anchors or "from adapters.yaml"}, '
                       f'wheel geometry: {geometry_param or "from adapters.yaml"}')
 
+    mount = {f'mount_{k}': float(LaunchConfiguration(f'imu_{k}').perform(context))
+             for k in ('roll', 'pitch', 'yaw')}
+
     uwb_overrides = dict(sim)
     dropout = LaunchConfiguration('uwb_dropout').perform(context).strip()
     if dropout:
@@ -98,7 +96,7 @@ def _launch_setup(context, *args, **kwargs):
              output='screen',
              parameters=[adapters_file, anchor_param, setup_file, uwb_overrides]),
         Node(package=PKG, executable='imu_adapter', name='imu_adapter',
-             output='screen', parameters=[adapters_file, setup_file, sim]),
+             output='screen', parameters=[adapters_file, mount, setup_file, sim]),
         Node(package=PKG, executable='wheel_odom_adapter', name='wheel_odom_adapter',
              output='screen', parameters=[adapters_file, geometry_param, setup_file, sim]),
     ]
@@ -114,6 +112,10 @@ def _launch_setup(context, *args, **kwargs):
         return args + ['--frame-id', 'base_link', '--child-frame-id', child]
 
     static_tfs = [
+        # odom equals the UWB map frame (single EKF, world_frame odom).
+        Node(package='tf2_ros', executable='static_transform_publisher',
+             name='map_to_odom_tf', arguments=['--frame-id', 'map', '--child-frame-id', 'odom'],
+             parameters=[sim]),
         Node(package='tf2_ros', executable='static_transform_publisher',
              name='base_to_imu_tf', arguments=tf_args('imu', 'imu_link'), parameters=[sim]),
         Node(package='tf2_ros', executable='static_transform_publisher',
@@ -121,24 +123,19 @@ def _launch_setup(context, *args, **kwargs):
              parameters=[sim]),
     ]
 
-    ekfs = [
-        Node(package='robot_localization', executable='ekf_node', name='ekf_odom',
-             output='screen', parameters=[_ekf_params(context, ekf_file, 'ekf_odom')],
-             remappings=[('odometry/filtered', '/odometry/local')]),
-        Node(package='robot_localization', executable='ekf_node', name='ekf_map',
-             output='screen', parameters=[_ekf_params(context, ekf_file, 'ekf_map')],
-             remappings=[('odometry/filtered', '/odometry/global')]),
-    ]
-    return [log] + adapters + static_tfs + ekfs
+    # Subscribes set_pose (resolves to /set_pose), used by the alignment drive.
+    ekf = Node(package='robot_localization', executable='ekf_node', name='ekf',
+               output='screen', parameters=[_ekf_params(context, ekf_file)],
+               remappings=[('odometry/filtered', '/odometry/filtered')])
+    return [log] + adapters + static_tfs + [ekf]
 
 
 def generate_launch_description():
     share = get_package_share_directory(PKG)
     args = [
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('two_d_mode', default_value='false'),
-        DeclareLaunchArgument('fuse_imu_yaw', default_value='true'),
-        DeclareLaunchArgument('fuse_imu_accel', default_value='false'),
+        DeclareLaunchArgument('two_d_mode', default_value='true'),
+        DeclareLaunchArgument('use_imu', default_value='true'),
         DeclareLaunchArgument('use_wheel_odom', default_value='true'),
         DeclareLaunchArgument('uwb_dropout', default_value=''),
         DeclareLaunchArgument(
