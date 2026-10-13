@@ -1,0 +1,20 @@
+# Named safe points for go_to_goal routes, in map coordinates (m), i.e. the
+# UWB anchor frame of the setup in use. TODO survey: stand the robot (or the
+# UWB tag) on each point and average /localization/uwb_pose for 30 s. Keep
+# points clear of the mesh, trees and the feeder, and inside the geofence in
+# nav.yaml (start_route refuses points outside it).
+#
+# Example (not real coordinates):
+#   waypoints:
+#     north_log: [12.0, 18.5]
+#     pond_edge: [20.5, 9.0]
+waypoints: {}
+
+route:
+  # sequence: in the order of `points`. shuffled: a new random order every
+  # session (never starting where the previous session ended) and a random
+  # dwell between points, to resist habituation.
+  mode: shuffled
+  points: []            # names to visit; empty = every waypoint above
+  dwell_s: [10.0, 40.0] # s, dwell drawn uniformly from this range
+  loops: 1              # sessions per start_route call

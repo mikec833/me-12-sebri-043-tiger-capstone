@@ -6,7 +6,7 @@ Subscribes  /odometry/filtered, /localization/uwb_pose, /localization/wheel_odom
             /drive/armed, /drive/owner, /drive/status
 Publishes   /cmd_vel (20 Hz, only while active), /nav/status (std_msgs/String),
             /set_pose (heading alignment)
-Services    ~/stop (std_srvs/Trigger); ~/start_route is added by routes
+Services    ~/start_route, ~/stop (std_srvs/Trigger)
 Calls       /teensy_interface_node/arm and /disarm
 
 States
@@ -22,11 +22,23 @@ progress_distance in progress_window_s), per goal timeout, keeper takeover
 (owner BLE), unexpected disarm, or any FAULT. The node never re-arms on its
 own after an abort; only a new goal or route request arms again.
 
+Routes (~/start_route): named safe points from waypoints_file
+(config/waypoints.yaml), visited in 'sequence' or 'shuffled' order. Shuffled
+draws a new order every session (never starting where the last one ended)
+and a random dwell between points, so the robot's movements do not become
+predictable to the tiger. The robot stays armed and stationary while it
+dwells. Any abort cancels the route; it is never resumed automatically.
+
 /nav/status lines: "<STATE>,<detail>", e.g. "DRIVE,rho=2.31", "ABORT,owner BLE".
 """
 
 import math
+import os
+import random
 import time
+
+import yaml
+from ament_index_python.packages import get_package_share_directory
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
@@ -61,6 +73,7 @@ class GoToGoal(Node):
             self.declare_parameter(name, default)
         self.declare_parameter('geofence', [0.0])   # flat x, y list; [0.0] = no fence
         self.declare_parameter('require_geofence', True)
+        self.declare_parameter('waypoints_file', '')   # '' = package config/waypoints.yaml
         self.p = {k: float(self.get_parameter(k).value) for k in NAV_PARAMS}
         fence = list(self.get_parameter('geofence').value)
         self.fence = nm.pairs(fence) if len(fence) >= 6 else []
@@ -80,6 +93,12 @@ class GoToGoal(Node):
         self.status_pub = self.create_publisher(String, '/nav/status', 10)
         self.create_subscription(PoseStamped, '/goal_pose', self._on_goal, 10)
         self.create_service(Trigger, '~/stop', self._srv_stop)
+        self.create_service(Trigger, '~/start_route', self._srv_start_route)
+        self.route = []              # remaining (name, x, y)
+        self.route_info = None       # dict: mode, dwell range, loops left, points
+        self.dwell_until = None
+        self.last_point = None
+        self.rng = random.Random()
 
         self.state = 'IDLE'
         self.detail = ''
@@ -112,7 +131,64 @@ class GoToGoal(Node):
         return response
 
     def on_stop(self):
-        """Hook for subclasses (routes) to cancel their own state."""
+        self.route, self.route_info = [], None
+
+    # ---- routes ------------------------------------------------------------------
+
+    def load_route(self):
+        path = self.get_parameter('waypoints_file').value or os.path.join(
+            get_package_share_directory('robot_navigation_pkg'), 'config', 'waypoints.yaml')
+        with open(path) as f:
+            cfg = yaml.safe_load(f) or {}
+        points = {str(k): (float(v[0]), float(v[1])) for k, v in (cfg.get('waypoints') or {}).items()}
+        route = cfg.get('route') or {}
+        names = [str(n) for n in (route.get('points') or sorted(points))]
+        missing = [n for n in names if n not in points]
+        if missing:
+            raise ValueError(f'route names not in waypoints: {missing}')
+        if len(names) < 1:
+            raise ValueError(f'no waypoints in {path} (survey them first)')
+        if self.fence:
+            outside = [n for n in names if not nm.inside_polygon(*points[n], self.fence)]
+            if outside:
+                raise ValueError(f'waypoints outside the geofence: {outside}')
+        dwell = [float(d) for d in route.get('dwell_s', [5.0, 5.0])]
+        return {'mode': str(route.get('mode', 'sequence')), 'names': names, 'points': points,
+                'dwell': (min(dwell), max(dwell)), 'loops': int(route.get('loops', 1))}
+
+    def _next_session(self):
+        info = self.route_info
+        order = nm.route_order(info['names'], info['mode'], self.rng, self.last_point)
+        self.route = [(n,) + info['points'][n] for n in order]
+        info['loops'] -= 1
+        self.get_logger().info(f'route session: {" -> ".join(order)}')
+
+    def _srv_start_route(self, request, response):
+        if self.state != 'IDLE':
+            response.success, response.message = False, f'busy ({self.state})'
+            return response
+        if self.require_fence and not self.fence:
+            response.success, response.message = False, 'no geofence configured'
+            return response
+        try:
+            self.route_info = self.load_route()
+        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+            response.success, response.message = False, str(exc)
+            return response
+        self._next_session()
+        name, x, y = self.route.pop(0)
+        response.success = self.start_goal(x, y, name)
+        response.message = (f'{self.route_info["mode"]} route started at {name}'
+                            if response.success else self.detail)
+        return response
+
+    def _advance_route(self):
+        if not self.route and self.route_info and self.route_info['loops'] > 0:
+            self._next_session()
+        if not self.route:
+            return False
+        name, x, y = self.route.pop(0)
+        return self.start_goal(x, y, name)
 
     # ---- goals -----------------------------------------------------------------
 
@@ -136,8 +212,19 @@ class GoToGoal(Node):
         return True
 
     def goal_reached(self):
-        """Hook: routes override this to move to the next waypoint."""
-        self.finish('arrived at ' + self.goal[2])
+        name = self.goal[2]
+        self.last_point = name
+        more = bool(self.route) or bool(self.route_info and self.route_info['loops'] > 0)
+        if self.route_info is None or not more:
+            suffix = ' (route complete)' if self.route_info else ''
+            self.on_stop()
+            self.finish('arrived at ' + name + suffix)
+            return
+        lo, hi = self.route_info['dwell']
+        dwell = self.rng.uniform(lo, hi)
+        self.dwell_until = time.monotonic() + dwell
+        self.goal_started = None            # no goal timeout while dwelling
+        self.enter('DWELL', f'at {name} for {dwell:.0f} s')
 
     # ---- state helpers ---------------------------------------------------------
 
@@ -173,6 +260,7 @@ class GoToGoal(Node):
             self.drive.disarm()
         self.goal = None
         self.after_pause = None
+        self.on_stop()                      # an abort cancels any route
         self.enter('ABORT', reason)
         self.enter('IDLE', 'after abort')
 
@@ -320,6 +408,8 @@ class GoToGoal(Node):
 
     def state_dwell(self, now):
         self.publish_cmd(0.0, 0.0, exact=True)
+        if now >= self.dwell_until and not self._advance_route():
+            self.finish('route ended')
 
 
 def main(args=None):

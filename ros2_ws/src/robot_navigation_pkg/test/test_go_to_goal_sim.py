@@ -56,8 +56,11 @@ class World:
         self.transitions = []                      # (state, time)
         enter = self.node.enter
 
+        self.entered = []                          # (state, detail) per transition
+
         def logged_enter(state, detail=''):
             self.transitions.append((state, FakeTime.t))
+            self.entered.append((state, detail))
             enter(state, detail)
         self.node.enter = logged_enter
         self.cmds = []                             # (time, v, w, node state)
@@ -190,10 +193,11 @@ def test_second_goal_skips_alignment():
     w = World(yaw_deg=-30.0)
     w.goal(5.0, 1.0)
     assert w.run_until('IDLE', 120.0)
-    aligns = w.states.count('ALIGN')
+    aligns = [st for st, _ in w.entered].count('ALIGN')
+    assert aligns == 1
     w.goal(3.0, 4.0)
     assert w.run_until('IDLE', 120.0)
-    assert w.states.count('ALIGN') == aligns
+    assert [st for st, _ in w.entered].count('ALIGN') == aligns
     assert math.hypot(w.x - 3.0, w.y - 4.0) < 0.4
 
 
@@ -259,3 +263,66 @@ def test_stop_service():
     assert w.run_until('DRIVE', 60.0)
     resp = w.bus.services['/go_to_goal/stop'](rclpy_stub.Msg())
     assert resp.success and w.node.state == 'IDLE' and w.disarm_calls >= 1
+
+
+def write_waypoints(tmp_path, mode, names, dwell=(1.0, 3.0), loops=1):
+    pts = {'a': [3.0, 3.0], 'b': [9.0, 3.0], 'c': [9.0, 8.0], 'd': [3.0, 8.0]}
+    text = 'waypoints:\n' + ''.join(f'  {k}: [{v[0]}, {v[1]}]\n' for k, v in pts.items())
+    text += (f'route:\n  mode: {mode}\n  points: [{", ".join(names)}]\n'
+             f'  dwell_s: [{dwell[0]}, {dwell[1]}]\n  loops: {loops}\n')
+    path = tmp_path / 'waypoints.yaml'
+    path.write_text(text)
+    return pts, str(path)
+
+
+def visited(w):
+    """Waypoint names in the order they were reached (one per transition)."""
+    return [d.split('at ', 1)[1].split(' ')[0] for st, d in w.entered
+            if (st == 'DWELL' and d.startswith('at ')) or (st == 'IDLE' and d.startswith('arrived at '))]
+
+
+def test_shuffled_route_twice_without_abort(tmp_path):
+    pts, path = write_waypoints(tmp_path, 'shuffled', [], loops=2)
+    fence = [0.0, 0.0, 12.0, 0.0, 12.0, 11.0, 0.0, 11.0]
+    w = World(x=6.0, y=5.0, overrides={'waypoints_file': path, 'geofence': fence,
+                                        'require_geofence': True})
+    w.node.rng.seed(4)
+    resp = w.bus.services['/go_to_goal/start_route'](rclpy_stub.Msg())
+    assert resp.success, resp.message
+    assert w.run_until('IDLE', 600.0), w.status()[-4:]
+    assert not any(s.startswith('ABORT') for s in w.status())
+    order = visited(w)
+    assert len(order) == 8 and sorted(order[:4]) == sorted(pts) == sorted(order[4:])
+    assert order[4] != order[3]                 # new session does not start where it ended
+    assert w.entered[-1][1].endswith('(route complete)')
+    assert [st for st, _ in w.entered].count('ALIGN') == 1   # aligned once for the route
+
+
+def test_sequence_route_order(tmp_path):
+    _, path = write_waypoints(tmp_path, 'sequence', ['b', 'c', 'a'], dwell=(0.5, 0.5))
+    w = World(x=6.0, y=5.0, overrides={'waypoints_file': path})
+    assert w.bus.services['/go_to_goal/start_route'](rclpy_stub.Msg()).success
+    assert w.run_until('IDLE', 400.0)
+    assert visited(w) == ['b', 'c', 'a']
+
+
+def test_route_refuses_points_outside_fence(tmp_path):
+    _, path = write_waypoints(tmp_path, 'sequence', [])
+    fence = [0.0, 0.0, 8.0, 0.0, 8.0, 11.0, 0.0, 11.0]   # b and c are outside
+    w = World(overrides={'waypoints_file': path, 'geofence': fence})
+    resp = w.bus.services['/go_to_goal/start_route'](rclpy_stub.Msg())
+    assert not resp.success and 'outside the geofence' in resp.message
+    assert w.arm_calls == 0
+
+
+def test_abort_cancels_route(tmp_path):
+    _, path = write_waypoints(tmp_path, 'sequence', ['b', 'c'])
+    w = World(x=6.0, y=5.0, overrides={'waypoints_file': path})
+    assert w.bus.services['/go_to_goal/start_route'](rclpy_stub.Msg()).success
+    assert w.run_until('DRIVE', 60.0)
+    w.keeper_takeover()
+    w.step(0.1)
+    assert w.node.state == 'IDLE' and w.node.route == [] and w.node.route_info is None
+    arms = w.arm_calls
+    w.step(10.0)
+    assert w.arm_calls == arms
