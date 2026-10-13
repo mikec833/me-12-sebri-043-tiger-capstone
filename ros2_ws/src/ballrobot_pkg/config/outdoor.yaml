@@ -1,6 +1,7 @@
 # Outdoor anchor layout. Use with:
 #   ./scripts/run_sensors.sh config:=outdoor
-# See default.yaml for the file format.
+# See default.yaml for the file format and for how ballrobot_localization_pkg
+# shares this file.
 
 uwb_node:
   ros__parameters:

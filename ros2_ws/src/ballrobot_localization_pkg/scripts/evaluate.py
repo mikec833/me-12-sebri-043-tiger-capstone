@@ -138,13 +138,22 @@ def rate_hz(series):
     return (len(series['t']) - 1) / span if span > 0 else 0.0
 
 
-def load_anchors(adapters_path):
-    if yaml is None or not os.path.exists(adapters_path):
+def load_anchors(setup, adapters_path):
+    """Anchor positions (3 x 3, m) from the shared setup file, falling back
+    to adapters.yaml. Same precedence as localization.launch.py."""
+    if yaml is None:
         return None
-    with open(adapters_path) as f:
-        cfg = yaml.safe_load(f)
-    flat = cfg['uwb_pose_adapter']['ros__parameters']['anchor_positions']
-    return np.array(flat, dtype=float).reshape(3, 3)
+    try:
+        sys.path.insert(0, os.path.join(HERE, '..'))
+        from ballrobot_localization_pkg import setup_config
+        flat = setup_config.anchor_positions(setup_config.load(setup_config.resolve(setup)))
+    except (ImportError, FileNotFoundError) as exc:
+        print(f'note: setup config not used ({exc})')
+        flat = None
+    if flat is None and os.path.exists(adapters_path):
+        with open(adapters_path) as f:
+            flat = yaml.safe_load(f)['uwb_pose_adapter']['ros__parameters']['anchor_positions']
+    return np.array(flat, dtype=float).reshape(3, 3) if flat else None
 
 
 def parse_windows(text):
@@ -397,7 +406,7 @@ def run(args):
     windows = parse_windows(args.dropout)
     # Same reference as uwb_pose_adapter 'relative' dropout windows.
     t_ref = uwb['t'][0] if uwb is not None else (glob or local or {'t': [0.0]})['t'][0]
-    anchors = load_anchors(args.adapters_config)
+    anchors = load_anchors(args.config, args.adapters_config)
 
     plot_xy(args.out, uwb, local, glob, anchors, args.label)
     plot_time(args.out, t_ref, uwb, local, glob, windows, args.label)
@@ -527,6 +536,9 @@ def main(argv=None):
     r.add_argument('--dropout', default='',
                    help='start,end[,start,end] seconds after the first UWB sample')
     r.add_argument('--ground-truth', default='', help='CSV with columns t,x,y')
+    r.add_argument('--config', default='default',
+                   help='shared setup file used for the run: name in ballrobot_pkg/config/ '
+                        'or a path (bringup saves a copy in src/outputs/run_<id>/)')
     r.add_argument('--adapters-config', default=DEFAULT_ADAPTERS)
     r.add_argument('--yaw-sign', type=float, default=1.0,
                    help='imu_adapter yaw_sign used in this run')

@@ -25,29 +25,64 @@ colcon build --packages-select ballrobot_localization_pkg
 source install/setup.bash
 ```
 
-**Live, on the robot.** Start the sensors as usual, then start localization:
+**Live, on the robot.** Start the sensors as usual, then start localization with
+the **same setup name** (see section 1a):
 
 ```bash
-ros2 launch ballrobot_pkg bringup.launch.py          # terminal 1, existing sensor nodes
-ros2 launch ballrobot_localization_pkg localization.launch.py  # terminal 2
+./scripts/run_sensors.sh config:=outdoor                                        # terminal 1
+ros2 launch ballrobot_localization_pkg localization.launch.py config:=outdoor   # terminal 2
 ```
 
 **Offline, from a bag.** The bag supplies the raw sensor topics and only the new
 nodes run:
 
 ```bash
-ros2 launch ballrobot_localization_pkg offline.launch.py       # terminal 1
+ros2 launch ballrobot_localization_pkg offline.launch.py \
+    config:=src/outputs/run_<id>/config_outdoor.yaml    # terminal 1
 ros2 bag play bags/run_<id> --clock                    # terminal 2
 ```
+
+Pass the setup the bag was recorded with. `bringup.launch.py` saves a copy of it
+next to each run's CSVs, as shown above.
 
 **All four comparison runs**, then evaluation and `results/summary.md`:
 
 ```bash
-src/ballrobot_localization_pkg/scripts/run_comparison.sh bags/run_<id> 30
+CONFIG=src/outputs/run_<id>/config_outdoor.yaml \
+    src/ballrobot_localization_pkg/scripts/run_comparison.sh bags/run_<id> 30
 ```
 
 The `30` is when, in seconds after the first UWB sample, run D starts its 10 s UWB
-blackout. Pick a stretch where the robot is moving.
+blackout. Pick a stretch where the robot is moving. `CONFIG` defaults to `default`.
+
+### 1a. Shared setup files
+
+Each physical setup (an anchor survey, plus any calibration that goes with it) is
+one YAML file in `ballrobot_pkg/config/`. Both packages read the same file:
+
+| Package | How to select it | What it reads |
+| --- | --- | --- |
+| `ballrobot_pkg` | `run_sensors.sh config:=<name>` | Each sensor node reads its own block, e.g. `uwb_node.anchor_positions`. |
+| `ballrobot_localization_pkg` | `localization.launch.py config:=<name>`, `evaluate.py run --config <name>` | `uwb_node.anchor_positions` for the clamp test and the anchor plot, plus optional `uwb_pose_adapter`, `imu_adapter` and `wheel_odom_adapter` blocks. |
+
+`<name>` is a file in `ballrobot_pkg/config/` without `.yaml`, or a path. Both
+launch files use the same rule. The anchor layout is therefore written down once.
+If the two packages were given different anchors, the clamp test would silently
+stop working (the outdoor plane is 4.5 cm higher than the default one).
+
+Adapter parameters are resolved in this order, last wins:
+`config/adapters.yaml` < anchors from the setup's `uwb_node` block < the setup's
+own adapter blocks < launch arguments such as `uwb_dropout`. To store per-setup
+calibration, add a block to the setup file:
+
+```yaml
+imu_adapter:
+  ros__parameters:
+    yaw_offset_deg: 37.5      # from evaluate.py on an outdoor bag
+```
+
+After you edit or add a setup file, run `colcon build`, or pass the file by path.
+The code is in `ballrobot_localization_pkg/setup_config.py`.
 
 ---
 
@@ -119,7 +154,7 @@ and source written next to it there. Values marked TODO there are first guesses.
 | `uwb_var_z` | 1.0 | m^2 | The anchors are coplanar, so z is barely observed. Kept large on purpose. |
 | `orientation_variance` | 1e6 | rad^2 | The pose carries no orientation. |
 | `infer_clamped` | true | | `uwb_node` does not publish `clamped`, so it is inferred (see below). |
-| `anchor_positions` | uwb_node default | m | **Must match** the `uwb_node` parameter. |
+| `anchor_positions` | 1.8 m triangle | m | Taken from the shared setup file (section 1a). This value is only a fallback. |
 | `clamp_tolerance` | 1e-3 | m | Distance from the anchor plane below which a sample counts as clamped. |
 | `dropout_windows` | [0, 0] | s | Flat `[start, end, ...]` list. A zero-length pair does nothing. |
 | `dropout_time_reference` | relative | | `relative`: seconds after the first UWB sample. `absolute`: raw stamp seconds. |
@@ -191,6 +226,7 @@ inflated because the filter has no IMU bias states.
 | `fuse_imu_accel` | false | IMU ax, ay, az in both EKFs, with gravity removed by `robot_localization`. |
 | `use_wheel_odom` | true | false clears `odom0_config` (run C). |
 | `uwb_dropout` | empty | `start,end[,...]` seconds; overrides `dropout_windows` (run D). |
+| `config` | default | Shared setup file: a name in `ballrobot_pkg/config/` or a path (section 1a). |
 | `adapters_config`, `ekf_config` | package files | Alternative parameter files. |
 
 ---
@@ -276,9 +312,10 @@ same script will run.
   to 8, spread around the perimeter with some at different heights.
 * **Map frame lives in `uwb_node` parameters.** `uwb_node` overwrites
   `uwb_trilateration.ANCHOR_POSITIONS` at runtime with its `anchor_positions`
-  parameter (default: a 1.8 m triangle). The values written in
-  `uwb_trilateration.py` are not used. Keep `adapters.yaml` in step with the
-  `uwb_node` parameter.
+  parameter, which comes from the shared setup file (`default`: a 1.8 m triangle
+  at 1.3 m; `outdoor`: a 15 m triangle at 1.345 m). The values written in
+  `uwb_trilateration.py` are not used. Always replay with the same setup the bag
+  was recorded with.
 * **UWB timestamps.** The task brief described an `elapsed_ms` bug in a
   `uwb_serial_reader.py` that stamps before a blocking serial read. **No such file
   or code exists** in this workspace. The reader actually used,

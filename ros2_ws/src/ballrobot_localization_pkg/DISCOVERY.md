@@ -99,5 +99,5 @@ point to plane test if the anchors are ever mounted at different heights.
 | C1 clamped | Inferred in `uwb_pose_adapter` from distance to the anchor plane. No edit needed. |
 | C2, C3 IMU | Use the fused roll, pitch, yaw. Derive yaw rate from orientation. Scale accel to m/s^2 and let `robot_localization` remove gravity, but leave accel fusion off by default. |
 | C5 timestamp | Documented in README limitations. No change to the existing reader. |
-| C6 anchors | `adapters.yaml` carries the `uwb_node` anchor set. |
+| C6 anchors | Since PR #3 the anchors live in shared setup files, `ballrobot_pkg/config/<name>.yaml` (`default`, `outdoor`). The localization launch reads the same file (`config:=<name>`), so the layout exists once. |
 | C7, C8 | Package built to run on the Pi. Comparison table pending a bag with UWB. |

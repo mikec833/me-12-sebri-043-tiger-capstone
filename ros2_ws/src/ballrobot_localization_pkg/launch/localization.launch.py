@@ -13,6 +13,11 @@ Launch arguments
     use_wheel_odom    true    false clears odom0_config in both EKFs (run C)
     uwb_dropout       ''      'start,end[,start,end...]' seconds, overrides
                               the uwb_pose_adapter dropout_windows (run D)
+    config            default shared setup file, same argument as
+                              ballrobot_pkg/bringup.launch.py: a name in
+                              ballrobot_pkg/config/ or a path. Supplies the
+                              anchor layout and optional adapter overrides
+                              (see ballrobot_localization_pkg/setup_config.py)
     adapters_config, ekf_config   parameter file paths
     imu_x/y/z/roll/pitch/yaw, uwb_x/y/z   base_link offsets (m, rad)
 """
@@ -22,9 +27,11 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+from ballrobot_localization_pkg import setup_config
 
 PKG = 'ballrobot_localization_pkg'
 IMU_YAW = 5
@@ -70,6 +77,14 @@ def _launch_setup(context, *args, **kwargs):
     ekf_file = LaunchConfiguration('ekf_config').perform(context)
     sim = {'use_sim_time': _bool(context, 'use_sim_time')}
 
+    # Shared setup file. Order of precedence, lowest first: adapters.yaml,
+    # anchors from the setup's uwb_node block, the setup's own adapter
+    # blocks, then launch arguments.
+    setup_file = setup_config.resolve(LaunchConfiguration('config').perform(context))
+    anchors = setup_config.anchor_positions(setup_config.load(setup_file))
+    anchor_param = {'anchor_positions': anchors} if anchors else {}
+    log = LogInfo(msg=f'Setup config: {setup_file}, UWB anchors: {anchors or "from adapters.yaml"}')
+
     uwb_overrides = dict(sim)
     dropout = LaunchConfiguration('uwb_dropout').perform(context).strip()
     if dropout:
@@ -77,11 +92,12 @@ def _launch_setup(context, *args, **kwargs):
 
     adapters = [
         Node(package=PKG, executable='uwb_pose_adapter', name='uwb_pose_adapter',
-             output='screen', parameters=[adapters_file, uwb_overrides]),
+             output='screen',
+             parameters=[adapters_file, anchor_param, setup_file, uwb_overrides]),
         Node(package=PKG, executable='imu_adapter', name='imu_adapter',
-             output='screen', parameters=[adapters_file, sim]),
+             output='screen', parameters=[adapters_file, setup_file, sim]),
         Node(package=PKG, executable='wheel_odom_adapter', name='wheel_odom_adapter',
-             output='screen', parameters=[adapters_file, sim]),
+             output='screen', parameters=[adapters_file, setup_file, sim]),
     ]
 
     def tf_args(prefix, child, rotation=True):
@@ -110,7 +126,7 @@ def _launch_setup(context, *args, **kwargs):
              output='screen', parameters=[_ekf_params(context, ekf_file, 'ekf_map')],
              remappings=[('odometry/filtered', '/odometry/global')]),
     ]
-    return adapters + static_tfs + ekfs
+    return [log] + adapters + static_tfs + ekfs
 
 
 def generate_launch_description():
@@ -122,6 +138,9 @@ def generate_launch_description():
         DeclareLaunchArgument('fuse_imu_accel', default_value='false'),
         DeclareLaunchArgument('use_wheel_odom', default_value='true'),
         DeclareLaunchArgument('uwb_dropout', default_value=''),
+        DeclareLaunchArgument(
+            'config', default_value='default',
+            description='Shared setup file: name in ballrobot_pkg/config/ or a path'),
         DeclareLaunchArgument(
             'adapters_config', default_value=os.path.join(share, 'config', 'adapters.yaml')),
         DeclareLaunchArgument(

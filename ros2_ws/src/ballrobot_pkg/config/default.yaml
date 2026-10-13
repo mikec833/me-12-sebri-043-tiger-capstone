@@ -8,6 +8,12 @@
 # Lists must be all one type: write 15.0, not 15, in a float list.
 # Rebuild (colcon build) after editing, or pass a full path instead:
 #   ./scripts/run_sensors.sh config:=/path/to/my.yaml
+#
+# Shared setup file: also read by ballrobot_localization_pkg
+# (localization.launch.py config:=<name>), which takes the UWB anchor layout
+# from the uwb_node block below. Optional uwb_pose_adapter, imu_adapter and
+# wheel_odom_adapter blocks override that package's config/adapters.yaml for
+# this setup. Keep one file per physical setup so both packages agree.
 
 uwb_node:
   ros__parameters:

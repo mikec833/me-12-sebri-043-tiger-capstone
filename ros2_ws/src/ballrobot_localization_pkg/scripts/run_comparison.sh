@@ -8,11 +8,16 @@
 #
 # dropout_start: seconds after the first UWB sample where run D blanks UWB
 # for 10 s (default 30). Pick a stretch where the robot is moving.
+#
+# CONFIG selects the shared setup file the bag was recorded with (default
+# 'default'), a name in ballrobot_pkg/config/ or a path, for example the copy
+# bringup saved: CONFIG=src/outputs/run_<id>/config_outdoor.yaml
 set -eo pipefail
 
 BAG="${1:?usage: run_comparison.sh <sensor_bag> [dropout_start] [ground_truth.csv]}"
 DROP_START="${2:-30}"
 GT="${3:-}"
+CONFIG="${CONFIG:-default}"
 DROP_END=$(python3 -c "print(float('$DROP_START') + 10.0)")
 
 PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +34,7 @@ run_one() {
     rm -rf "$out"; mkdir -p "$out"
     echo "=== Run $label: $*"
 
-    ros2 launch ballrobot_localization_pkg offline.launch.py "$@" > "$out/launch.log" 2>&1 &
+    ros2 launch ballrobot_localization_pkg offline.launch.py "config:=$CONFIG" "$@" > "$out/launch.log" 2>&1 &
     local launch_pid=$!
     sleep 4  # let the EKFs and adapters come up before data arrives
 
@@ -45,7 +50,7 @@ run_one() {
     kill -INT "$launch_pid" 2>/dev/null || true
     wait "$launch_pid" 2>/dev/null || true
 
-    local eval_args=(run --bag "$out/bag" --out "$out" --label "$label")
+    local eval_args=(run --bag "$out/bag" --out "$out" --label "$label" --config "$CONFIG")
     [[ -n "$dropout" ]] && eval_args+=(--dropout "$dropout")
     [[ -n "$GT" ]] && eval_args+=(--ground-truth "$GT")
     python3 "$EVAL" "${eval_args[@]}"
