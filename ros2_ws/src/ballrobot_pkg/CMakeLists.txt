@@ -40,9 +40,10 @@ install(FILES
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Launch files
+# Launch files and per-setup parameter files (config/<name>.yaml)
 install(DIRECTORY
   launch
+  config
   DESTINATION share/${PROJECT_NAME}
 )
 
