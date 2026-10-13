@@ -1,0 +1,9 @@
+# Outdoor anchor layout. Use with:
+#   ./scripts/run_sensors.sh config:=outdoor
+# See default.yaml for the file format.
+
+uwb_node:
+  ros__parameters:
+    anchor_ids: [1, 2, 3]
+    anchor_positions: [0.0, 0.0, 1.345,  15.0, 0.0, 1.345,  0.0, 15.0, 1.345]
+    tag_below_anchor_plane: true

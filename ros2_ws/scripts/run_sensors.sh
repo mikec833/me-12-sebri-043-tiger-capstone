@@ -4,6 +4,9 @@
 # ros2_ws/src/outputs/run_<run_id>. Ctrl-C stops everything cleanly.
 #
 # Extra arguments are passed straight to the launch file, e.g.
+#   ./scripts/run_sensors.sh config:=outdoor      # src/ballrobot_pkg/config/outdoor.yaml
+#   (node settings such as UWB anchor positions; default is config/default.yaml,
+#   and a copy of the one used is saved in the run's outputs folder)
 #   ./scripts/run_sensors.sh teensy_port:=/dev/ttyACM1 uwb_port:=/dev/ttyACM0
 #   (ports are auto-detected by USB name; only override if that picks wrong)
 #   ./scripts/run_sensors.sh record:=false      # nodes only, no bag

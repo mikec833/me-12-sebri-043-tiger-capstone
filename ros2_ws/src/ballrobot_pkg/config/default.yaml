@@ -1,0 +1,18 @@
+# Per-node parameters for bringup.launch.py, selected with
+#   ./scripts/run_sensors.sh config:=<name>     (config/<name>.yaml)
+# This file is used when no config is given. Each top-level key is a
+# node name; a node only reads its own block, so settings for any node
+# in the launch file can be added here. Launch arguments (ports, run_id)
+# still override these.
+#
+# Lists must be all one type: write 15.0, not 15, in a float list.
+# Rebuild (colcon build) after editing, or pass a full path instead:
+#   ./scripts/run_sensors.sh config:=/path/to/my.yaml
+
+uwb_node:
+  ros__parameters:
+    # Anchor IDs in the order of anchor_positions below
+    anchor_ids: [1, 2, 3]
+    # x, y, z (m) per anchor, in the global UWB frame
+    anchor_positions: [0.0, 0.0, 1.3,  1.8, 0.0, 1.3,  0.0, 1.8, 1.3]
+    tag_below_anchor_plane: true

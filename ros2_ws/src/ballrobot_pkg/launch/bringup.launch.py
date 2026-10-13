@@ -1,8 +1,11 @@
 import glob
+import os
+import shutil
 from datetime import datetime
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -23,6 +26,40 @@ def find_serial_port(patterns, fallback):
         if matches:
             return matches[0]
     return fallback
+
+
+def resolve_config(context):
+    """Resolve the `config` launch argument to a parameter file path.
+
+    A bare name (e.g. `outdoor`) means config/<name>.yaml in this
+    package's installed share directory; anything containing a `/` or
+    ending in .yaml is taken as a path. The resolved path is stored as
+    the `config_file` launch configuration (read by every node below),
+    and a copy is saved next to the run's CSVs so each run records the
+    setup it used.
+    """
+    config = context.launch_configurations['config'].strip()
+    config_dir = os.path.join(get_package_share_directory('ballrobot_pkg'), 'config')
+    if '/' in config or config.endswith('.yaml'):
+        path = os.path.abspath(os.path.expanduser(config))
+    else:
+        path = os.path.join(config_dir, f'{config}.yaml')
+    if not os.path.isfile(path):
+        available = sorted(
+            f[:-len('.yaml')] for f in os.listdir(config_dir) if f.endswith('.yaml'))
+        raise RuntimeError(
+            f"Config '{config}' not found ({path}). Available: {', '.join(available)}. "
+            "Rebuild with colcon build after adding a new file to config/.")
+    context.launch_configurations['config_file'] = path
+
+    # Same folder the nodes' CSVs land in (see run_logging.py), relative
+    # to where `ros2 launch` is run (ros2_ws/)
+    run_id = context.launch_configurations['run_id']
+    run_dir = os.path.join('src', 'outputs', f'run_{run_id}')
+    os.makedirs(run_dir, exist_ok=True)
+    shutil.copy(path, os.path.join(run_dir, f'config_{os.path.basename(path)}'))
+
+    return [LogInfo(msg=f'Config: {path}')]
 
 
 def generate_launch_description():
@@ -65,6 +102,16 @@ def generate_launch_description():
     enable_imu_quat_arg = DeclareLaunchArgument(
         'enable_imu_quat', default_value='false',
         description='Also start imu_quaternion_node.py (debug/visualization aid)')
+
+    # Per-node parameters (anchor layout etc.) come from a YAML file in
+    # config/, picked by name, e.g. for config/outdoor.yaml:
+    #   ros2 launch ballrobot_pkg bringup.launch.py config:=outdoor
+    # or by path: config:=/home/<user>/my_setup.yaml. Every node gets the
+    # file but only reads its own block; see config/default.yaml.
+    config_arg = DeclareLaunchArgument(
+        'config', default_value='default',
+        description='Parameter file: name in config/ (no .yaml) or a path')
+    config_file = LaunchConfiguration('config_file')
 
     # Computed once per `ros2 launch` invocation (generate_launch_description()
     # runs once), then handed to every node below as the `run_id` parameter,
@@ -117,7 +164,7 @@ def generate_launch_description():
         executable='teensy_interface_node.py',
         name='teensy_interface_node',
         output='screen',
-        parameters=[{
+        parameters=[config_file, {
             'serial_port': LaunchConfiguration('teensy_port'),
             'run_id': run_id_param,
         }],
@@ -128,7 +175,7 @@ def generate_launch_description():
         executable='uwb_node.py',
         name='uwb_node',
         output='screen',
-        parameters=[{
+        parameters=[config_file, {
             'serial_port': LaunchConfiguration('uwb_port'),
             'run_id': run_id_param,
         }],
@@ -139,7 +186,7 @@ def generate_launch_description():
         executable='imu_node.py',
         name='imu_node',
         output='screen',
-        parameters=[{
+        parameters=[config_file, {
             'serial_port': LaunchConfiguration('imu_port'),
             'run_id': run_id_param,
         }],
@@ -150,7 +197,7 @@ def generate_launch_description():
         executable='cmd_vel_bridge.py',
         name='cmd_vel_bridge',
         output='screen',
-        parameters=[{'run_id': run_id_param}],
+        parameters=[config_file, {'run_id': run_id_param}],
     )
 
     solenoid_release_node = Node(
@@ -158,7 +205,7 @@ def generate_launch_description():
         executable='solenoid_release_node.py',
         name='solenoid_release_node',
         output='screen',
-        parameters=[{
+        parameters=[config_file, {
             'xiao_address': LaunchConfiguration('xiao_address'),
             'run_id': run_id_param,
         }],
@@ -169,7 +216,7 @@ def generate_launch_description():
         executable='sound_player_node.py',
         name='sound_player_node',
         output='screen',
-        parameters=[{'sound_file': LaunchConfiguration('sound_file')}],
+        parameters=[config_file, {'sound_file': LaunchConfiguration('sound_file')}],
     )
 
     # Streams imu/rpy heading to the operator GUI over BLE (the Pi
@@ -179,6 +226,7 @@ def generate_launch_description():
         executable='heading_ble_node.py',
         name='heading_ble_node',
         output='screen',
+        parameters=[config_file],
     )
 
     imu_quaternion_node = Node(
@@ -186,7 +234,7 @@ def generate_launch_description():
         executable='imu_quaternion_node.py',
         name='imu_quaternion_node',
         output='screen',
-        parameters=[{'run_id': run_id_param}],
+        parameters=[config_file, {'run_id': run_id_param}],
         condition=IfCondition(LaunchConfiguration('enable_imu_quat')),
     )
 
@@ -212,6 +260,9 @@ def generate_launch_description():
         enable_imu_quat_arg,
         run_id_arg,
         record_arg,
+        config_arg,
+        # Must come before the nodes: sets config_file for them
+        OpaqueFunction(function=resolve_config),
         run_id_log,
         port_log,
         teensy_interface_node,
