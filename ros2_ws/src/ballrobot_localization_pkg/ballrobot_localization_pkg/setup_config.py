@@ -8,7 +8,8 @@ packages, so the anchor layout is written down exactly once:
     this package   localization.launch.py config:=<name> adapters, evaluate.py
 
 Each top level key is a node name and a node only reads its own block.
-From the uwb_node block this package takes anchor_positions. Optional
+From the uwb_node block this package takes anchor_positions, and from the
+teensy_interface_node block r_eff and b_eff (drive geometry). Optional
 uwb_pose_adapter, imu_adapter and wheel_odom_adapter blocks override
 config/adapters.yaml for that setup.
 
@@ -71,3 +72,14 @@ def anchor_positions(cfg: dict) -> Optional[List[float]]:
     if len(flat) != 9:
         raise ValueError(f'uwb_node anchor_positions needs 9 values, got {len(flat)}')
     return flat
+
+
+def drive_geometry(cfg: dict) -> dict:
+    """wheel_odom_adapter overrides from the teensy_interface_node block."""
+    drive = node_params(cfg, 'teensy_interface_node')
+    out = {}
+    if 'r_eff' in drive:
+        out['wheel_radius'] = float(drive['r_eff'])
+    if 'b_eff' in drive:
+        out['b_eff'] = float(drive['b_eff'])
+    return out

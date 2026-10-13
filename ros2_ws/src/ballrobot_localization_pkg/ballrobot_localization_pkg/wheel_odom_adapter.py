@@ -19,8 +19,16 @@ Kinematics (Sphero style differential drive inside the shell):
     v_z = 0      ground robot
     w_z = k_v * wheel_radius * (w_R - w_L) / b_eff
 
-v_y is reported as zero with the loose variance var_vy, because lateral
-slip on grass is real. The pose block is left at zero with a huge
+v_y = 0 is the non holonomic constraint that keeps heading observable
+between UWB fixes; var_vy sets how hard the EKF holds it.
+
+Decimation: input arrives at up to 100 Hz. Wheel rates are averaged over
+each 1 / output_rate_hz interval and published once, stamped with the last
+input sample in the interval (0 publishes every sample).
+
+wheel_radius and b_eff are normally copied by localization.launch.py from
+the teensy_interface_node r_eff and b_eff in the shared setup file, so the
+drive and the odometry always use the same geometry. The pose block is left at zero with a huge
 covariance and must not be fused. No TF is published here.
 
 The source header.stamp is copied unchanged. Zero stamps are dropped and
@@ -59,6 +67,7 @@ class WheelOdomAdapter(Node):
         self.declare_parameter('var_vy', 0.1)
         self.declare_parameter('var_vz', 0.01)
         self.declare_parameter('var_wz', 0.04)
+        self.declare_parameter('output_rate_hz', 50.0)
         self.declare_parameter('unused_variance', 1e6)
 
         p = self.get_parameter
@@ -84,6 +93,10 @@ class WheelOdomAdapter(Node):
         self._twist_cov = diagonal_covariance([
             p('var_vx').value, p('var_vy').value, p('var_vz').value,
             big, big, p('var_wz').value])
+
+        rate = float(p('output_rate_hz').value)
+        self._period_ns = int(1e9 / rate) if rate > 0.0 else 0
+        self._acc = [0.0, 0.0, 0, None]   # sum w_L, sum w_R, count, interval start (ns)
 
         self._counters = CounterPublisher(
             self, ['received', 'published', 'dropped_zero_stamp', 'dropped_malformed'])
@@ -121,7 +134,19 @@ class WheelOdomAdapter(Node):
                 f'{self._right_name}, dropped', throttle_duration_sec=5.0)
             return
 
-        v_x, w_z = diff_drive_twist(rates[0], rates[1], self._k_v, self._radius, self._b_eff)
+        t_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        acc = self._acc
+        if acc[3] is None or t_ns < acc[3]:
+            acc[:] = [0.0, 0.0, 0, t_ns]
+        acc[0] += rates[0]
+        acc[1] += rates[1]
+        acc[2] += 1
+        if t_ns - acc[3] < self._period_ns:
+            return
+        w_l, w_r = acc[0] / acc[2], acc[1] / acc[2]
+        acc[:] = [0.0, 0.0, 0, t_ns]
+
+        v_x, w_z = diff_drive_twist(w_l, w_r, self._k_v, self._radius, self._b_eff)
         out = Odometry()
         out.header.stamp = msg.header.stamp
         out.header.frame_id = self._frame_id

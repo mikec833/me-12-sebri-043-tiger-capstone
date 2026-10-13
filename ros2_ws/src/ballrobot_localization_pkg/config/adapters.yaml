@@ -103,17 +103,21 @@ wheel_odom_adapter:
     left_sign: 1.0
     right_sign: 1.0
 
-    # Kinematics. Source: cmd_vel_bridge.py defaults (wheel_radius_m 0.072,
-    # wheel_base_m 0.22, CAD "220mm_Track"). k_v (dimensionless) absorbs
-    # shell slip and the wheel to shell contact geometry. TODO: fit k_v from
-    # straight runs against UWB, b_eff (m) from in place spins against IMU yaw.
+    # Kinematics. wheel_radius and b_eff are fallbacks only: the launch file
+    # copies r_eff and b_eff from the teensy_interface_node block of the shared
+    # setup file (robot_navigation_pkg/scripts/calibrate.py computes them).
+    # k_v (dimensionless) is an extra slip factor, left at 1 when r_eff is
+    # calibrated against UWB.
     k_v: 1.0
     wheel_radius: 0.072
     b_eff: 0.22
 
-    # Twist variance. TODO: tune.
-    var_vx: 0.01      # (m/s)^2
-    var_vy: 0.1       # (m/s)^2, loose: lateral slip on grass is not zero
-    var_vz: 0.01      # (m/s)^2, ground robot
-    var_wz: 0.04      # (rad/s)^2
+    # Twist variance, starting values from the navigation brief (section 3).
+    # TODO calibrate against bags.
+    var_vx: 0.05      # (m/s)^2
+    var_vy: 0.001     # (m/s)^2, tight: v_y = 0 keeps heading observable
+    var_vz: 0.01      # (m/s)^2, ground robot (unused in two_d_mode)
+    var_wz: 0.1       # (rad/s)^2, loose: shell slip makes wheel yaw rate unreliable
+    # Average and publish at this rate to save CPU on the Pi 3 (0 = every sample).
+    output_rate_hz: 50.0
     unused_variance: 1.0e6

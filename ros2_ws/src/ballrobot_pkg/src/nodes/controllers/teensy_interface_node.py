@@ -30,6 +30,8 @@
 #   Publishes  /drive/status (std_msgs/String, every non-MEAS line)
 #              /drive/armed  (std_msgs/Bool, armed under SERIAL, latched)
 #              /drive/owner  (std_msgs/String, NONE|BLE|SERIAL|UNKNOWN, latched)
+#              /drive/command (std_msgs/String, each M/P/S line sent; used by
+#              the calibration script to pair command percent with MEAS)
 # Drive parameters come from the shared setup file (config/<name>.yaml,
 # teensy_interface_node block); the defaults below are conservative.
 
@@ -182,6 +184,7 @@ class TeensyInterfaceNode(Node):
         self.status_pub = self.create_publisher(String, '/drive/status', 50)
         self.armed_pub = self.create_publisher(Bool, '/drive/armed', latched)
         self.owner_pub = self.create_publisher(String, '/drive/owner', latched)
+        self.command_pub = self.create_publisher(String, '/drive/command', 10)
         self._publish_drive_state()
 
         # SERVICES
@@ -253,9 +256,11 @@ class TeensyInterfaceNode(Node):
             return  # never drive, or feed the watchdog, unless we own an armed robot
         twist = self._last_twist
         if twist is None or time.monotonic() - twist[2] > self._cmd_timeout_s:
-            self.write_line('S')
-            return
-        self.write_line(command_line(twist[0], twist[1], self._drive))
+            line = 'S'
+        else:
+            line = command_line(twist[0], twist[1], self._drive)
+        if self.write_line(line):
+            self.command_pub.publish(String(data=line))
 
     def _publish_drive_state(self):
         self.armed_pub.publish(Bool(data=self._armed))

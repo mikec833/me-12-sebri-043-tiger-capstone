@@ -81,9 +81,12 @@ def _launch_setup(context, *args, **kwargs):
     # anchors from the setup's uwb_node block, the setup's own adapter
     # blocks, then launch arguments.
     setup_file = setup_config.resolve(LaunchConfiguration('config').perform(context))
-    anchors = setup_config.anchor_positions(setup_config.load(setup_file))
+    setup = setup_config.load(setup_file)
+    anchors = setup_config.anchor_positions(setup)
     anchor_param = {'anchor_positions': anchors} if anchors else {}
-    log = LogInfo(msg=f'Setup config: {setup_file}, UWB anchors: {anchors or "from adapters.yaml"}')
+    geometry_param = setup_config.drive_geometry(setup)
+    log = LogInfo(msg=f'Setup config: {setup_file}, UWB anchors: {anchors or "from adapters.yaml"}, '
+                      f'wheel geometry: {geometry_param or "from adapters.yaml"}')
 
     uwb_overrides = dict(sim)
     dropout = LaunchConfiguration('uwb_dropout').perform(context).strip()
@@ -97,7 +100,7 @@ def _launch_setup(context, *args, **kwargs):
         Node(package=PKG, executable='imu_adapter', name='imu_adapter',
              output='screen', parameters=[adapters_file, setup_file, sim]),
         Node(package=PKG, executable='wheel_odom_adapter', name='wheel_odom_adapter',
-             output='screen', parameters=[adapters_file, setup_file, sim]),
+             output='screen', parameters=[adapters_file, geometry_param, setup_file, sim]),
     ]
 
     def tf_args(prefix, child, rotation=True):
