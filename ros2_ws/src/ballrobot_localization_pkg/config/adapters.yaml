@@ -1,0 +1,108 @@
+# Parameters for the three ballrobot_localization_pkg adapter nodes.
+# Units are given on every line. "Source" says where each value came from.
+# Values marked TODO are first guesses that must be measured or tuned.
+
+uwb_pose_adapter:
+  ros__parameters:
+    input_topic: /uwb/position           # PointStamped from ballrobot_pkg/uwb_node.py
+    output_topic: /localization/uwb_pose
+    frame_id: map
+
+    # Position variance, m^2. Source: sample to sample noise in the September
+    # UWB CSV logs is about 0.1 m (variance 0.01) on a 1.8 m anchor triangle
+    # indoors. Inflated to about 0.22 m for longer outdoor ranges and multipath.
+    # TODO: tune from a static outdoor capture.
+    uwb_var_x: 0.05
+    uwb_var_y: 0.05
+    # z is poorly observed: all three anchors sit at the same height, so z
+    # only comes from the residual of the range sphere fit. Kept large.
+    uwb_var_z: 1.0
+    # rad^2. The pose has no orientation, so roll, pitch and yaw are unusable.
+    orientation_variance: 1.0e6
+
+    # uwb_node.py does not publish the clamped flag. A clamped solve lands on
+    # the anchor plane, so samples within clamp_tolerance (m) of the plane
+    # through anchor_positions are dropped. anchor_positions MUST equal the
+    # uwb_node.py parameter of the same name (x1,y1,z1,x2,y2,z2,x3,y3,z3, m).
+    # Source: uwb_node.py default. Verified on the September logs: 243 of 243
+    # clamped samples matched, 0 false positives.
+    infer_clamped: true
+    anchor_positions: [0.0, 0.0, 1.3, 1.8, 0.0, 1.3, 0.0, 1.8, 1.3]
+    clamp_tolerance: 1.0e-3
+
+    # Dropout test, seconds. Flat list of start, end pairs:
+    # [30.0, 40.0, 90.0, 100.0] blanks two 10 s windows. A zero length pair
+    # suppresses nothing. 'relative' counts from the first UWB sample received,
+    # 'absolute' uses raw header.stamp seconds.
+    dropout_windows: [0.0, 0.0]
+    dropout_time_reference: relative
+
+imu_adapter:
+  ros__parameters:
+    rpy_topic: /imu/rpy                  # Vector3Stamped, degrees, from imu_node.py
+    accel_topic: /imu/accel              # Vector3Stamped, raw counts (milli g)
+    output_topic: /localization/imu
+    frame_id: imu_link
+
+    # Pairing of rpy and accel, s. They share a stamp, so slop only covers jitter.
+    sync_slop: 0.005
+    sync_queue_size: 20
+
+    # m/s^2 per count. Source: BNO085 UART-RVC reports milli g; bag data reads
+    # about 1010 counts on one axis at rest. Gravity is NOT removed.
+    accel_scale: 9.80665e-3
+
+    # Heading alignment. yaw_used = yaw_sign * yaw + yaw_offset_deg.
+    # TODO: verify yaw_sign with a slow counter clockwise turn (ROS yaw must
+    # increase). TODO: measure yaw_offset_deg so heading 0 points along map +x.
+    yaw_sign: 1.0
+    yaw_offset_deg: 0.0
+
+    # Orientation variance, rad^2. Roll and pitch from the BNO085 fusion are
+    # good to about 2 deg: (0.035 rad)^2.
+    roll_variance: 0.0012
+    pitch_variance: 0.0012
+    # Inflated for magnetometer EMI from the Sabertooth: about 10 deg, (0.17 rad)^2.
+    # TODO: tune from runs B versus A.
+    yaw_variance: 0.03
+
+    # The RVC frame has no gyro output, so angular velocity is derived from
+    # the change in fused orientation over angular_velocity_window samples
+    # (5 samples at 100 Hz = 50 ms window, about 25 ms lag).
+    derive_angular_velocity: true
+    angular_velocity_window: 5
+    angular_velocity_variance: 0.0025    # (rad/s)^2, about 3 deg/s
+    linear_acceleration_variance: 0.25   # (m/s^2)^2, about 0.5 m/s^2
+
+wheel_odom_adapter:
+  ros__parameters:
+    input_topic: /wheel_states           # JointState from teensy_interface_node.py
+    output_topic: /localization/wheel_odom
+    frame_id: odom
+    child_frame_id: base_link
+    left_joint: left_wheel
+    right_joint: right_wheel
+
+    # Source: the XIAO firmware already converts encoder counts to rad/s at
+    # the gearbox output. counts_per_rev is only used for counts_per_s input.
+    input_units: rad_s
+    counts_per_rev: 4480.0               # Pololu #2825: 64 CPR x 70:1 (firmware)
+
+    # TODO: confirm both wheels read positive when driving forward.
+    left_sign: 1.0
+    right_sign: 1.0
+
+    # Kinematics. Source: cmd_vel_bridge.py defaults (wheel_radius_m 0.072,
+    # wheel_base_m 0.22, CAD "220mm_Track"). k_v (dimensionless) absorbs
+    # shell slip and the wheel to shell contact geometry. TODO: fit k_v from
+    # straight runs against UWB, b_eff (m) from in place spins against IMU yaw.
+    k_v: 1.0
+    wheel_radius: 0.072
+    b_eff: 0.22
+
+    # Twist variance. TODO: tune.
+    var_vx: 0.01      # (m/s)^2
+    var_vy: 0.1       # (m/s)^2, loose: lateral slip on grass is not zero
+    var_vz: 0.01      # (m/s)^2, ground robot
+    var_wz: 0.04      # (rad/s)^2
+    unused_variance: 1.0e6
