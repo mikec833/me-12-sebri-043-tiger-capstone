@@ -288,11 +288,13 @@ class TeensyInterfaceNode(Node):
             self.get_logger().debug(f'XIAO: {line}')
         elif kind not in ('VERSION',):
             self.get_logger().info(f'XIAO: {line}')
+        # Publish the new state before releasing a waiting ~/arm call, so
+        # /drive/armed is already out when the service reply arrives.
+        if (self._armed, self._owner) != before:
+            self._publish_drive_state()
         if line == 'STATE,ARMED' or line.startswith('STATE,BUSY') or kind == 'FAULT':
             self._arm_reply = line
             self._arm_event.set()
-        if (self._armed, self._owner) != before:
-            self._publish_drive_state()
 
     def srv_arm(self, request, response):
         for attempt in (1, 2):

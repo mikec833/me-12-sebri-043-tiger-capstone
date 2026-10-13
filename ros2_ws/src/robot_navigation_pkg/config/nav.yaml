@@ -1,7 +1,8 @@
 # Navigation parameters. Values are starting points from the navigation
 # brief; tune on the ground and record a bag per trial.
 
-align_heading:
+# Heading alignment (brief 4.1), shared by align_heading and go_to_goal.
+/**:
   ros__parameters:
     v_align: 0.15             # m/s, straight alignment drive
     d_align: 1.5              # m, by wheel odometry
@@ -9,3 +10,42 @@ align_heading:
     align_max_rms: 0.15       # m, and the line fit residual is smaller
     align_yaw_variance: 0.05  # rad^2, sent to the EKF with the heading
     set_pose_topic: /set_pose
+
+go_to_goal:
+  ros__parameters:
+    # Control law (brief section 5)
+    v_max: 0.3                # m/s
+    v_min: 0.05               # m/s
+    omega_max: 0.6            # rad/s, ROTATE
+    omega_min: 0.2            # rad/s, ROTATE floor so a pivot always moves
+    omega_drive: 0.4          # rad/s, steering limit while driving
+    k_rho: 0.5                # 1/s
+    k_psi: 1.0                # 1/s
+    k_omega: 1.0              # 1/s
+    rotate_to_drive_deg: 20.0
+    drive_to_rotate_deg: 50.0
+    arrive_radius: 0.4        # m
+    pause_s: 0.3              # zero command between ROTATE and DRIVE
+    accel_v: 0.3              # m/s^2, slew limit
+    accel_omega: 1.5          # rad/s^2, slew limit
+
+    # Abort conditions
+    max_pose_age_s: 0.5
+    max_fix_age_s: 2.0
+    max_position_std: 0.5     # m, from the EKF covariance
+    fence_lookahead_s: 0.5
+    progress_distance: 0.2    # m
+    progress_window_s: 15.0
+    goal_timeout_s: 120.0
+    arm_timeout_s: 3.0
+    armed_grace_s: 1.0        # latched /drive/armed may trail the arm reply
+    align_max_age_s: 900.0    # realign after this long
+    settle_after_align_s: 0.5
+
+    # Geofence polygon in map coordinates (m), flat x1, y1, x2, y2, ...
+    # TODO survey: the enclosure corners inside the UWB anchor frame, with a
+    # margin from the mesh. Goals are refused until this is set
+    # (require_geofence), because the alignment drive heads in an unknown
+    # direction. [0.0] means no fence.
+    geofence: [0.0]
+    require_geofence: true
