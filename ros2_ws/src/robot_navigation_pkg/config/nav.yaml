@@ -41,6 +41,7 @@ go_to_goal:
     armed_grace_s: 1.0        # latched /drive/armed may trail the arm reply
     align_max_age_s: 900.0    # realign after this long
     settle_after_align_s: 0.5
+    align_fence_margin: 0.5   # m, ALIGN needs d_align + this clearance all round
 
     # Geofence polygon in map coordinates (m), flat x1, y1, x2, y2, ...
     # TODO survey: the enclosure corners inside the UWB anchor frame, with a

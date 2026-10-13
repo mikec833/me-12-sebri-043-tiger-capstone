@@ -159,6 +159,19 @@ def inside_polygon(x: float, y: float, polygon: Sequence[Point]) -> bool:
     return inside
 
 
+def distance_to_edges(x: float, y: float, polygon: Sequence[Point]) -> float:
+    """Shortest distance from (x, y) to any polygon edge (inf without a fence)."""
+    if len(polygon) < 3:
+        return math.inf
+    best = math.inf
+    for i in range(len(polygon)):
+        (ax, ay), (bx, by) = polygon[i], polygon[(i + 1) % len(polygon)]
+        dx, dy = bx - ax, by - ay
+        t = 0.0 if dx == dy == 0 else clip(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy), 0, 1)
+        best = min(best, math.hypot(x - (ax + t * dx), y - (ay + t * dy)))
+    return best
+
+
 def pairs(flat: Sequence[float]) -> List[Point]:
     if len(flat) % 2:
         raise ValueError('expected x, y pairs')

@@ -61,7 +61,7 @@ NAV_PARAMS = {
     'max_pose_age_s': 0.5, 'max_fix_age_s': 2.0, 'max_position_std': 0.5,
     'fence_lookahead_s': 0.5, 'progress_distance': 0.2, 'progress_window_s': 15.0,
     'goal_timeout_s': 120.0, 'arm_timeout_s': 3.0, 'align_max_age_s': 900.0,
-    'settle_after_align_s': 0.5, 'armed_grace_s': 1.0,
+    'settle_after_align_s': 0.5, 'armed_grace_s': 1.0, 'align_fence_margin': 0.5,
 }
 
 
@@ -296,7 +296,9 @@ class GoToGoal(Node):
         if self.fence:
             if not nm.inside_polygon(loc.x, loc.y, self.fence):
                 return f'outside geofence at ({loc.x:.2f}, {loc.y:.2f})'
-            if loc.yaw is not None:
+            # Before alignment the EKF heading is unknown, so the look ahead
+            # would point the wrong way; ALIGN starts only with clearance.
+            if loc.yaw is not None and self.state != 'ALIGN':
                 t = p['fence_lookahead_s']
                 px = loc.x + loc.v * math.cos(loc.yaw) * t
                 py = loc.y + loc.v * math.sin(loc.yaw) * t
@@ -335,6 +337,12 @@ class GoToGoal(Node):
         elif self.aligned:
             self.pause_then('ROTATE')
         else:
+            clearance = nm.distance_to_edges(self.loc.x, self.loc.y, self.fence)
+            need = float(self.get_parameter('d_align').value) + self.p['align_fence_margin']
+            if clearance < need:
+                self.abort(f'too close to the geofence to align ({clearance:.2f} m, need '
+                           f'{need:.2f} m in every direction): start on open ground')
+                return
             self.aligner.reset()
             self.enter('ALIGN', 'driving straight to find heading')
 

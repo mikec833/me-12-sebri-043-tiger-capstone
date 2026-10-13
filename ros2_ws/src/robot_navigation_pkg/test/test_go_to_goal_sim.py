@@ -235,6 +235,13 @@ def test_no_progress_aborts():
     assert any('no progress' in s for s in w.status())
 
 
+def test_distance_to_edges():
+    from robot_navigation_pkg import nav_math as nm
+    sq = nm.pairs([0, 0, 10, 0, 10, 10, 0, 10])
+    assert abs(nm.distance_to_edges(5, 5, sq) - 5) < 1e-12
+    assert abs(nm.distance_to_edges(9, 5, sq) - 1) < 1e-12
+
+
 def test_geofence():
     fence = [0.0, 0.0, 6.0, 0.0, 6.0, 6.0, 0.0, 6.0]
     w = World(x=3.0, y=3.0, yaw_deg=0.0, overrides={'geofence': fence})
@@ -242,11 +249,23 @@ def test_geofence():
     w.step(0.5)
     assert w.node.state == 'IDLE' and w.arm_calls == 0
     assert any('outside the geofence' in s for s in w.status())
-    w.x = 4.8                              # facing the east edge, 1.2 m away
-    w.goal(4.0, 3.0)                       # inside, but the alignment drive heads out
+    w.x = 4.8                              # 1.2 m from the east edge
+    w.goal(4.0, 3.0)                       # inside, but too close to align safely
     w.run_until('IDLE', 60.0)
-    assert any('geofence' in s for s in w.status()[-3:]), w.status()[-3:]
-    assert w.x < 6.0                       # stopped by the look ahead, before the edge
+    assert any('too close to the geofence to align' in s for s in w.status()), w.status()[-3:]
+    assert abs(w.x - 4.8) < 0.05           # never moved
+
+
+def test_geofence_lookahead_after_alignment():
+    fence = [0.0, 0.0, 9.0, 0.0, 9.0, 9.0, 0.0, 9.0]
+    w = World(x=3.0, y=4.5, yaw_deg=0.0, overrides={'geofence': fence})
+    w.goal(8.6, 4.5)                       # 0.4 m inside the east edge
+    assert w.run_until('DRIVE', 60.0)
+    assert w.node.aligned
+    w.x, w.v = 8.0, 2.5                    # heading east, fast: 0.5 s ahead is past the edge
+    w.step(DT)
+    assert w.node.state == 'IDLE'
+    assert any('predicted outside geofence' in s for s in w.status()), w.status()[-3:]
 
 
 def test_no_fence_refuses_goals_by_default():
