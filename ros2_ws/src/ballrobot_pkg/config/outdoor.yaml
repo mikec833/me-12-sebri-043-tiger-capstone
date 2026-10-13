@@ -8,3 +8,19 @@ uwb_node:
     anchor_ids: [1, 2, 3]
     anchor_positions: [0.0, 0.0, 1.345,  15.0, 0.0, 1.345,  0.0, 15.0, 1.345]
     tag_below_anchor_plane: true
+
+# Drive interface for firmware v4.7 (teensy_interface_node.py). All values are
+# TODO calibrate on the ground inside UWB coverage (navigation brief 2.2,
+# robot_navigation_pkg/scripts/calibrate.py). Defaults are deliberately slow:
+# p0 and kp come from the wheels-raised motor ID runs (teensy/PI_tune_outputs),
+# which under-estimate the loaded deadband.
+teensy_interface_node:
+  ros__parameters:
+    accel_ms: 800       # TODO calibrate. Firmware C ramp up, ms
+    brake_ms: 700       # TODO calibrate. Firmware C ramp down, ms
+    max_percent: 20     # TODO calibrate. Firmware C output limit, integer %
+    r_eff: 0.072        # TODO calibrate. m, effective wheel radius
+    b_eff: 0.22         # TODO calibrate. m, effective track
+    p0: 3.0             # TODO calibrate. %, deadband offset
+    kp: 1.8             # TODO calibrate. % per rad/s of wheel speed
+    eps_v: 0.02         # m/s, speeds below this count as zero

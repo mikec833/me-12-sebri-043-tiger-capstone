@@ -37,6 +37,7 @@ install(FILES
   src/nodes/uwb_position_reader.py
   src/nodes/uwb_trilateration.py
   src/nodes/run_logging.py
+  src/nodes/controllers/drive_command.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
