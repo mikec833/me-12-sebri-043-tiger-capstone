@@ -8,7 +8,7 @@ the first True, writes the `command` parameter ("OPEN" by default) to the
 command characteristic of the feeder-box XIAO nRF52840. The write
 is sent with response, so a successful write means the XIAO received it.
 If the write fails it's retried every retry_period_s until it succeeds or
-release_timeout_s runs out; the sketch (xiao/feeder-box/feeder-box.ino)
+release_timeout_s runs out; the sketch (feeder-box/feeder_box_xiao_nrf52840_solenoid/)
 ignores OPEN during a pulse and for 3 s after one, so a retry after a
 lost ack can't fire twice. Once
 acknowledged, this node latches: later True messages are ignored until
@@ -70,7 +70,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from run_logging import resolve_run_output_dir
 
-# Must match COMMAND_UUID in the XIAO sketch (xiao/feeder-box/feeder-box.ino)
+# Must match COMMAND_UUID in the XIAO sketch (feeder-box/feeder_box_xiao_nrf52840_solenoid/)
 CMD_UUID = '7b6a1001-6c3a-4c9f-ae60-62b79b0e5135'
 
 
@@ -163,7 +163,7 @@ class SolenoidReleaseNode(Node):
                     await client.disconnect()
                     raise RuntimeError(
                         f'{device.address} has no command characteristic {CMD_UUID}; '
-                        'is feeder-box.ino flashed?')
+                        'is feeder_box_xiao_nrf52840_solenoid.ino flashed?')
                 self.client = client
                 self.log_event('connected', device.address)
                 self.get_logger().info(f'Connected to XIAO {device.address}')
