@@ -70,10 +70,13 @@ class UwbNode(Node):
         self.declare_parameter("serial_timeout_s", 1.0, read_only)
         self.declare_parameter("reconnect_period_s", 2.0, read_only)
         self.declare_parameter("anchor_ids", [1, 2, 3], read_only)
+        # dynamic_typing: accept whole numbers in the YAML too (e.g. 15
+        # rather than 15.0), which ROS would otherwise reject as the wrong
+        # type. A list mixing both still fails to load.
         self.declare_parameter(
             "anchor_positions",
             [0.0, 0.0, 1.3, 1.8, 0.0, 1.3, 0.0, 1.8, 1.3],
-            read_only,
+            ParameterDescriptor(read_only=True, dynamic_typing=True),
         )
         self.declare_parameter("tag_below_anchor_plane", True, read_only)
         self.declare_parameter("run_id", "", read_only)

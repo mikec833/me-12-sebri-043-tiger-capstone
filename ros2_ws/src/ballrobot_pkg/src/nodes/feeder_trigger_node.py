@@ -52,8 +52,11 @@ class FeederTriggerNode(Node):
         super().__init__('feeder_trigger_node')
 
         read_only = ParameterDescriptor(read_only=True)
-        self.declare_parameter('feeder_position', [0.0, 0.0], read_only)
-        self.declare_parameter('trigger_radius_m', 0.5, read_only)
+        # dynamic_typing: accept whole numbers in the YAML too, e.g.
+        # [4, 4] or 1, which ROS would otherwise reject as the wrong type
+        read_only_number = ParameterDescriptor(read_only=True, dynamic_typing=True)
+        self.declare_parameter('feeder_position', [0.0, 0.0], read_only_number)
+        self.declare_parameter('trigger_radius_m', 0.5, read_only_number)
         self.declare_parameter('confirm_samples', 3, read_only)
 
         position = [float(v) for v in self.get_parameter('feeder_position').value]

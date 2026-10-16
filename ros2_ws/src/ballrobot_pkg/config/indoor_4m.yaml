@@ -12,7 +12,7 @@ feeder_trigger_node:
   ros__parameters:
     # Feeder box (x, y) in the anchor frame above, m. PLACEHOLDER (centre
     # of the anchors) -- measure the real feeder position and update.
-    feeder_position: [4, 4]
+    feeder_position: [4.0, 4.0]
     # Send OPEN once the robot's UWB (x, y) is within this distance
     trigger_radius_m: 0.5
     # ...for this many UWB fixes in a row (filters one-off noisy readings)
