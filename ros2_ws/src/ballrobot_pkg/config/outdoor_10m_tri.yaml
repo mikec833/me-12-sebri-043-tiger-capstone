@@ -1,0 +1,9 @@
+# Outdoor anchor layout: equilateral triangle, 10 m sides (a1 origin, a2 on +x, a3 apex at (5, 5*sqrt(3))). Use with:
+#   ./scripts/run_sensors.sh config:=outdoor_10m_tri
+# See default.yaml for the file format.
+
+uwb_node:
+  ros__parameters:
+    anchor_ids: [1, 2, 3]
+    anchor_positions: [0.0, 0.0, 1.39,  10.0, 0.0, 1.39,  5.0, 8.660, 1.39]
+    tag_below_anchor_plane: true
