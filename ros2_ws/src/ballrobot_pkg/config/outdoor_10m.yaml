@@ -1,0 +1,9 @@
+# Outdoor anchor layout: right angle, 10 m legs (a1 origin, a2 on +x, a3 on +y). Use with:
+#   ./scripts/run_sensors.sh config:=outdoor_10m
+# See default.yaml for the file format.
+
+uwb_node:
+  ros__parameters:
+    anchor_ids: [1, 2, 3]
+    anchor_positions: [0.0, 0.0, 1.39,  10.0, 0.0, 1.39,  0.0, 10.0, 1.39]
+    tag_below_anchor_plane: true

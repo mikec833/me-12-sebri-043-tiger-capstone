@@ -1,0 +1,9 @@
+# Indoor anchor layout: equilateral triangle, 4 m sides (a1 origin, a2 on +x, a3 apex at (2, 2*sqrt(3))). Use with:
+#   ./scripts/run_sensors.sh config:=indoor_4m_tri
+# See default.yaml for the file format.
+
+uwb_node:
+  ros__parameters:
+    anchor_ids: [1, 2, 3]
+    anchor_positions: [0.0, 0.0, 1.39,  4.0, 0.0, 1.39,  2.0, 3.464, 1.39]
+    tag_below_anchor_plane: true
