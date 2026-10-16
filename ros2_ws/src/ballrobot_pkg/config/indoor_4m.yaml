@@ -7,3 +7,18 @@ uwb_node:
     anchor_ids: [1, 2, 3]
     anchor_positions: [0.0, 0.0, 1.39,  4.0, 0.0, 1.39,  0.0, 4.0, 1.39]
     tag_below_anchor_plane: true
+
+feeder_trigger_node:
+  ros__parameters:
+    # Feeder box (x, y) in the anchor frame above, m. PLACEHOLDER (centre
+    # of the anchors) -- measure the real feeder position and update.
+    feeder_position: [4, 4]
+    # Send OPEN once the robot's UWB (x, y) is within this distance
+    trigger_radius_m: 0.5
+    # ...for this many UWB fixes in a row (filters one-off noisy readings)
+    confirm_samples: 3
+
+solenoid_release_node:
+  ros__parameters:
+    # Command written to the feeder-box XIAO over BLE when triggered
+    command: OPEN

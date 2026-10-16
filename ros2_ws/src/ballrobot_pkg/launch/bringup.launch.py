@@ -154,7 +154,9 @@ def generate_launch_description():
         cmd=['ros2', 'bag', 'record',
              '-o', ['bags/run_', LaunchConfiguration('run_id')],
              '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
-             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel'],
+             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel',
+             '/feeder/distance', '/feeder_box_threshold_reached',
+             '/solenoid_released'],
         output='screen',
         condition=IfCondition(LaunchConfiguration('record')),
     )
@@ -198,6 +200,18 @@ def generate_launch_description():
         name='cmd_vel_bridge',
         output='screen',
         parameters=[config_file, {'run_id': run_id_param}],
+    )
+
+    # Watches uwb/position and publishes /feeder_box_threshold_reached
+    # once the robot is within trigger_radius_m of feeder_position (both
+    # set in the config YAML); solenoid_release_node then sends the
+    # OPEN command over BLE. See feeder_trigger_node.py.
+    feeder_trigger_node = Node(
+        package='ballrobot_pkg',
+        executable='feeder_trigger_node.py',
+        name='feeder_trigger_node',
+        output='screen',
+        parameters=[config_file],
     )
 
     solenoid_release_node = Node(
@@ -269,6 +283,7 @@ def generate_launch_description():
         uwb_node,
         imu_node,
         cmd_vel_bridge_node,
+        feeder_trigger_node,
         solenoid_release_node,
         sound_player_node,
         heading_ble_node,
