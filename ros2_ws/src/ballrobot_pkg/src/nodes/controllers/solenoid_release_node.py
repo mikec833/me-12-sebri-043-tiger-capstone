@@ -9,7 +9,7 @@ command characteristic of the feeder-box XIAO nRF52840. The write
 is sent with response, so a successful write means the XIAO received it.
 If the write fails it's retried every retry_period_s until it succeeds or
 release_timeout_s runs out; the sketch (feeder-box/feeder_box_xiao_nrf52840_solenoid/)
-ignores OPEN during a pulse and for 3 s after one, so a retry after a
+ignores OPEN during a pulse and for 10 s after one, so a retry after a
 lost ack can't fire twice. Once
 acknowledged, this node latches: later True messages are ignored until
 restart, so the outer loop can publish True at its own rate without
@@ -143,6 +143,7 @@ class SolenoidReleaseNode(Node):
             if self.client is not None and self.client.is_connected:
                 await asyncio.sleep(0.5)
                 continue
+            client = None
             try:
                 if self.xiao_address:
                     device = await BleakScanner.find_device_by_address(
@@ -171,7 +172,15 @@ class SolenoidReleaseNode(Node):
                 self.log_event('connect_fail', str(e))
                 self.get_logger().warn(
                     f'BLE connect to XIAO failed: {e}', throttle_duration_sec=5.0)
-                await asyncio.sleep(1.0)
+                # A timed-out connect can stay pending inside BlueZ, and every
+                # later attempt then fails with "Operation already in progress".
+                # Disconnecting cancels it.
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                await asyncio.sleep(2.0)
 
     def on_disconnect(self, _client):
         self.client = None

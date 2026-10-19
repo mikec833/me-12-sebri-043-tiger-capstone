@@ -1,7 +1,6 @@
 # Corrected feeder-box solenoid firmware
 
-Open `feeder_box_xiao_nrf52840_solenoid.ino` in Arduino IDE. Keep
-`latch_controller.h` in the same folder.
+Open `feeder_box_xiao_nrf52840_solenoid.ino` in Arduino IDE.
 
 Select:
 
@@ -14,14 +13,14 @@ Sense and non-Sense targets but was not flashed by Codex.
 
 Wiring/protocol assumptions:
 
-- XIAO D1 -> relay IN1
+- XIAO D0 -> relay IN1
 - S1 jumper -> COM-HIGH
 - relay COM1/NO1 switch the solenoid supply
 - Pi command -> `OPEN`
 - BLE name -> `TigerBall-Latch`
 
 Test first with the solenoid power branch disconnected. Confirm relay OFF at
-boot, one approximately 500 ms click after `OPEN`, three-second cooldown,
+boot, one approximately 500 ms click after `OPEN`, further `OPEN`s ignored for 10 s after it turns on,
 OFF after BLE disconnect, and OFF after a deliberate watchdog-reset test.
 
 See `INSTRUCTIONS_FOR_OTHER_AI.md` for the interface and safety invariants that

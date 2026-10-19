@@ -24,7 +24,11 @@ feeder_trigger_node:
     feeder_position: [0.6, 0.6]
     # Send OPEN once the robot's UWB (x, y) is within this distance
     trigger_radius_m: 0.5
-    # ...for this many UWB fixes in a row (filters one-off noisy readings)
+    # Leave the zone only beyond trigger_radius_m + this (stops UWB noise
+    # at the boundary flipping it on and off)
+    exit_margin_m: 0.2
+    # Enter/leave only after this many UWB fixes in a row (filters one-off
+    # noisy readings)
     confirm_samples: 3
 
 solenoid_release_node:
