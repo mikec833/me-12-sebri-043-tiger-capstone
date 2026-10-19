@@ -3,7 +3,7 @@ import os
 import shutil
 from datetime import datetime
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
@@ -154,7 +154,9 @@ def generate_launch_description():
         cmd=['ros2', 'bag', 'record',
              '-o', ['bags/run_', LaunchConfiguration('run_id')],
              '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
-             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel'],
+             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel',
+             '/feeder/distance', '/feeder_box_threshold_reached',
+             '/solenoid_released'],
         output='screen',
         condition=IfCondition(LaunchConfiguration('record')),
     )
@@ -200,6 +202,18 @@ def generate_launch_description():
         parameters=[config_file, {'run_id': run_id_param}],
     )
 
+    # Watches uwb/position and publishes /feeder_box_threshold_reached
+    # once the robot is within trigger_radius_m of feeder_position (both
+    # set in the config YAML); solenoid_release_node then sends the
+    # OPEN command over BLE. See feeder_trigger_node.py.
+    feeder_trigger_node = Node(
+        package='ballrobot_pkg',
+        executable='feeder_trigger_node.py',
+        name='feeder_trigger_node',
+        output='screen',
+        parameters=[config_file],
+    )
+
     solenoid_release_node = Node(
         package='ballrobot_pkg',
         executable='solenoid_release_node.py',
@@ -219,15 +233,31 @@ def generate_launch_description():
         parameters=[config_file, {'sound_file': LaunchConfiguration('sound_file')}],
     )
 
-    # Streams imu/rpy heading to the operator GUI over BLE (the Pi
-    # advertises as "TigerBall-Pi"); see heading_ble_node.py.
-    heading_ble_node = Node(
-        package='ballrobot_pkg',
-        executable='heading_ble_node.py',
-        name='heading_ble_node',
-        output='screen',
-        parameters=[config_file],
-    )
+    # foxglove_bridge serves every topic over a WebSocket on port 8765,
+    # for the Foxglove app (ws://<pi>:8765) and the operator GUI's
+    # heading compass (reads imu/rpy). This replaces heading_ble_node.py,
+    # so the Pi's Bluetooth is left free for solenoid_release_node.
+    # Install once with: sudo apt install ros-$ROS_DISTRO-foxglove-bridge
+    # Turn off with foxglove:=false.
+    foxglove_arg = DeclareLaunchArgument(
+        'foxglove', default_value='true',
+        description='Start foxglove_bridge (WebSocket, port 8765) for Foxglove and the GUI')
+    try:
+        get_package_share_directory('foxglove_bridge')
+        foxglove_bridge = Node(
+            package='foxglove_bridge',
+            executable='foxglove_bridge',
+            name='foxglove_bridge',
+            output='screen',
+            parameters=[{'port': 8765}],
+            condition=IfCondition(LaunchConfiguration('foxglove')),
+        )
+    except PackageNotFoundError:
+        foxglove_bridge = LogInfo(
+            msg='foxglove_bridge not installed -- no Foxglove/GUI heading link. Install with: '
+                'sudo apt install ros-$ROS_DISTRO-foxglove-bridge',
+            condition=IfCondition(LaunchConfiguration('foxglove')),
+        )
 
     imu_quaternion_node = Node(
         package='ballrobot_pkg',
@@ -260,6 +290,7 @@ def generate_launch_description():
         enable_imu_quat_arg,
         run_id_arg,
         record_arg,
+        foxglove_arg,
         config_arg,
         # Must come before the nodes: sets config_file for them
         OpaqueFunction(function=resolve_config),
@@ -269,9 +300,10 @@ def generate_launch_description():
         uwb_node,
         imu_node,
         cmd_vel_bridge_node,
+        feeder_trigger_node,
         solenoid_release_node,
         sound_player_node,
-        heading_ble_node,
+        foxglove_bridge,
         imu_quaternion_node,
         bag_recorder,
     ])

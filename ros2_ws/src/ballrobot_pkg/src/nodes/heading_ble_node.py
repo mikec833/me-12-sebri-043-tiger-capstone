@@ -2,6 +2,11 @@
 """
 Stream IMU heading from the Pi to the operator GUI over BLE.
 
+No longer started by bringup.launch.py: the GUI now reads imu/rpy over
+Wi-Fi from foxglove_bridge, which leaves the Pi's Bluetooth free for
+solenoid_release_node.py. Kept for running by hand with `ros2 run`; the
+current GUI no longer connects to it over BLE.
+
 The Pi acts as a BLE peripheral (GATT server), the same role the drive
 XIAO plays for the GUI, so the browser connects to it with Web Bluetooth
 and no Wi-Fi is needed. Subscribes to imu/rpy (geometry_msgs/Vector3Stamped

@@ -28,7 +28,7 @@
     .guide-dot.top{left:50%;top:7%}.guide-dot.top-right{left:80%;top:20%}.guide-dot.right{left:93%;top:50%}.guide-dot.bottom-right{left:80%;top:80%}.guide-dot.bottom{left:50%;top:93%}.guide-dot.bottom-left{left:20%;top:80%}.guide-dot.left{left:7%;top:50%}.guide-dot.top-left{left:20%;top:20%}
     .pad .forward-right{grid-column:3;grid-row:1}.pad .forward-left{grid-column:1;grid-row:1}.pad .reverse-right{grid-column:3;grid-row:3}.pad .reverse-left{grid-column:1;grid-row:3}
     .metric-explain{font-size:.82rem;color:#bbd0d4;margin:10px 0 0}
-    .heading-card{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;margin:0 0 13px}.compass{width:170px;height:170px;display:block}.compass .ring{fill:#0b1a23;stroke:#53818a;stroke-width:2}.compass .tick{stroke:#81b0b5;stroke-width:1.5}.compass .tick.major{stroke:#c3f9eb;stroke-width:2.5}.compass text{fill:#a7cdd2;font:700 11px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}.compass .needle{transition:transform 60ms linear;transform-origin:100px 100px}.compass .needle path{fill:#30afa3;stroke:#c3f9eb;stroke-width:1.5}.compass .needle .tail{fill:#40606a;stroke:#81b0b5}.compass.stale .needle path{fill:#4b5a60;stroke:#7d8e93}.heading-readout{display:grid;gap:8px}.heading-readout .big{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums;color:#f2f9f9;line-height:1}.heading-readout .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.heading-readout .row button{min-height:40px;padding:.4rem .8rem}.heading-readout label{display:flex;gap:6px;align-items:center;font-size:.86rem;color:#bbd0d4}.pi-state{font-size:.82rem;font-weight:750;color:#e4b76d}.pi-state.ready{color:#8be0cf}.pi-state.fault{color:#ffc7c7}.attitude{font-size:.86rem;color:#abc2c7;font-variant-numeric:tabular-nums}
+    .heading-card{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;margin:0 0 13px}.compass{width:170px;height:170px;display:block}.compass .ring{fill:#0b1a23;stroke:#53818a;stroke-width:2}.compass .tick{stroke:#81b0b5;stroke-width:1.5}.compass .tick.major{stroke:#c3f9eb;stroke-width:2.5}.compass text{fill:#a7cdd2;font:700 11px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}.compass .needle{transition:transform 60ms linear;transform-origin:100px 100px}.compass .needle path{fill:#30afa3;stroke:#c3f9eb;stroke-width:1.5}.compass .needle .tail{fill:#40606a;stroke:#81b0b5}.compass.stale .needle path{fill:#4b5a60;stroke:#7d8e93}.heading-readout{display:grid;gap:8px}.heading-readout .big{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums;color:#f2f9f9;line-height:1}.heading-readout .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.heading-readout .row button{min-height:40px;padding:.4rem .8rem}.heading-readout .pi-host{width:11.5rem;min-height:40px;padding:.3rem .55rem;border-radius:8px;border:1px solid #315060;background:#0b1a23;color:#e9f4f5}.heading-readout label{display:flex;gap:6px;align-items:center;font-size:.86rem;color:#bbd0d4}.pi-state{font-size:.82rem;font-weight:750;color:#e4b76d}.pi-state.ready{color:#8be0cf}.pi-state.fault{color:#ffc7c7}.attitude{font-size:.86rem;color:#abc2c7;font-variant-numeric:tabular-nums}
     @media(max-width:540px){.heading-card{grid-template-columns:1fr;justify-items:center;text-align:center}.heading-readout .row{justify-content:center}}
     .battery-tile{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#102b36;border:1px solid #315060;border-radius:12px;padding:7px 12px;margin:-3px 0 11px;font-variant-numeric:tabular-nums}.battery-tile strong{font-size:1.12rem;color:#b4eee0}.battery-tile small{color:#b4c9cf}.battery-tile.low{background:#54292d;border-color:#e17077}.battery-tile.low strong,.battery-tile.low small{color:#ffced0}
   </style>
@@ -42,7 +42,7 @@
   <div id="batteryTile" class="battery-tile" role="status" aria-live="polite"><span>Battery <strong id="batteryVoltage">—</strong></span><small id="batteryState">Waiting for reading</small></div>
   <section class="card heading-card" aria-label="Internal mechanism heading from the Pi IMU">
     <svg id="compass" class="compass stale" viewBox="0 0 200 200" role="img" aria-label="Heading compass"><circle class="ring" cx="100" cy="100" r="94"/><g id="compassTicks"></g><text x="100" y="33">0°</text><text x="165" y="100">90°</text><text x="100" y="167">180°</text><text x="35" y="100">270°</text><g id="needle" class="needle"><path class="tail" d="M93 100 L100 138 L107 100 Z"/><path d="M93 100 L100 48 L107 100 Z"/><circle cx="100" cy="100" r="6" fill="#c3f9eb"/></g></svg>
-    <div class="heading-readout"><h2 style="margin:0">Mechanism heading · Pi IMU</h2><div class="big" id="headingValue">—</div><div class="attitude">Raw yaw <span id="rawYaw">—</span> · pitch <span id="pitchValue">—</span> · roll <span id="rollValue">—</span></div><div id="piState" class="pi-state" role="status">Pi not connected</div><div class="row"><button id="piConnect" class="connect">Connect Pi</button><button id="zeroHeading" disabled>Zero heading</button><label><input id="flipHeading" type="checkbox">Reverse rotation</label></div><p class="tiny" style="margin:0">Relative to IMU power-up, not north. Face the mechanism at your reference, then press Zero. Rotate it clockwise by hand: if the needle turns the other way, tick Reverse rotation.</p></div>
+    <div class="heading-readout"><h2 style="margin:0">Mechanism heading · Pi IMU</h2><div class="big" id="headingValue">—</div><div class="attitude">Raw yaw <span id="rawYaw">—</span> · pitch <span id="pitchValue">—</span> · roll <span id="rollValue">—</span></div><div id="piState" class="pi-state" role="status">Pi not connected</div><div class="row"><input id="piHost" class="pi-host" type="text" spellcheck="false" autocomplete="off" aria-label="Pi address (hostname or IP)" placeholder="Pi address"><button id="piConnect" class="connect">Connect Pi</button><button id="zeroHeading" disabled>Zero heading</button><label><input id="flipHeading" type="checkbox">Reverse rotation</label></div><p class="tiny" style="margin:0">Streams imu/rpy from the Pi over Wi-Fi (foxglove_bridge, port 8765, started by run_sensors.sh); enter the Pi's address (default is its Tailscale IP). Relative to IMU power-up, not north. Face the mechanism at your reference, then press Zero. Rotate it clockwise by hand: if the needle turns the other way, tick Reverse rotation.</p></div>
   </section>
   <div class="tabs" role="tablist" aria-label="Drive mode"><button id="tabProportional" role="tab" aria-selected="true" aria-controls="proportionalPanel">Proportional</button><button id="tabBenchmark" role="tab" aria-selected="false" aria-controls="benchmarkPanel">Benchmark</button></div>
 
@@ -147,28 +147,50 @@ for(const id of ["pOutput","pCurve","pAccel","pBrake","bOutput","bCurve","bAccel
 setInterval(()=>{if(armed&&rx)sendMotion()},100);window.addEventListener("blur",()=>{if(armed||armPending)void sendDisarm("Focus lost · disarming")});document.addEventListener("visibilitychange",()=>{if(document.hidden&&(armed||armPending))void sendDisarm("Page hidden · disarming")});refreshControls();if(coreMissing){$("connect").disabled=true;status("Drive disabled · core file missing","fault");log("controller_core_v4.mjs not found; driving disabled. Connect Pi still works.")}
 setInterval(()=>{if(batteryLastAt&&Date.now()-batteryLastAt>4000)clearBattery("Reading stale")},1000);
 
-// ---- Pi heading link (heading_ble_node.py). Separate BLE device from the drive XIAO; display only, never commands motion.
-const PI_NAME="TigerBall-Pi",PI_SERVICE="7b6a2001-6c3a-4c9f-ae60-62b79b0e5135",PI_HEADING="7b6a2002-6c3a-4c9f-ae60-62b79b0e5135";
-const piDecoder=new TextDecoder();
-let piDevice=null,piChar=null,piUserDisconnect=false,piRetries=0,piLastAt=0,piCount=0,piRate=0,lastYaw=null,headingZero=0,needleAngle=0;
+// ---- Pi heading link: imu/rpy from the Pi's ROS graph via foxglove_bridge (WebSocket, Foxglove protocol). Separate from the drive XIAO; display only, never commands motion.
+// PI_DEFAULT_HOST is the Pi's Tailscale address; the box also takes a LAN IP/hostname or a full ws://host:port URL.
+const PI_PORT=8765,PI_TOPIC="/imu/rpy",PI_HOST_KEY="tigerball.piHost";
+let piSocket=null,piChannelId=null,piSubId=null,piNextSubId=1,piUserDisconnect=false,piRetries=0,piLastAt=0,piCount=0,piRate=0,lastYaw=null,headingZero=0,needleAngle=0;
 (()=>{let svg="";for(let a=0;a<360;a+=15){const major=a%90===0,r1=major?78:84,t=a*Math.PI/180;svg+=`<line class="tick${major?" major":""}" x1="${100+r1*Math.sin(t)}" y1="${100-r1*Math.cos(t)}" x2="${100+92*Math.sin(t)}" y2="${100-92*Math.cos(t)}"/>`}$("compassTicks").innerHTML=svg})();
+(()=>{let saved="";try{saved=localStorage.getItem(PI_HOST_KEY)||""}catch{}$("piHost").value=saved||"100.93.176.88"})();
 function wrap360(deg){return((deg%360)+360)%360}
 function piStatus(message,kind=""){const node=$("piState");node.textContent=message;node.className="pi-state"+(kind?" "+kind:"")}
 function renderHeading(){if(lastYaw===null)return;const heading=wrap360(($("flipHeading").checked?-1:1)*(lastYaw-headingZero));const delta=((heading-wrap360(needleAngle))+540)%360-180;needleAngle+=delta;$("needle").style.transform=`rotate(${needleAngle}deg)`;$("headingValue").textContent=heading.toFixed(1)+"°"}
-function onHeading(event){const p=piDecoder.decode(event.target.value).split(",").map(Number);if(p.length!==3||p.some(v=>!Number.isFinite(v)))return;lastYaw=p[0];$("rawYaw").textContent=p[0].toFixed(1)+"°";$("pitchValue").textContent=p[1].toFixed(1)+"°";$("rollValue").textContent=p[2].toFixed(1)+"°";piLastAt=Date.now();piCount++;$("compass").classList.remove("stale");$("zeroHeading").disabled=false;renderHeading()}
-async function piAttach(){const server=await piDevice.gatt.connect();const service=await server.getPrimaryService(PI_SERVICE);piChar=await service.getCharacteristic(PI_HEADING);piChar.removeEventListener("characteristicvaluechanged",onHeading);piChar.addEventListener("characteristicvaluechanged",onHeading);await piChar.startNotifications();piRetries=0;$("piConnect").textContent="Disconnect Pi";piStatus("Pi connected · waiting for IMU","ready");log("Connected to "+(piDevice.name||PI_NAME)+" (heading)")}
-async function piConnect(){
-  if(piDevice?.gatt.connected){piUserDisconnect=true;piDevice.gatt.disconnect();return}
-  if(!navigator.bluetooth){piStatus("Web Bluetooth unavailable","fault");return}
-  try{piUserDisconnect=false;piDevice=await navigator.bluetooth.requestDevice({filters:[{namePrefix:PI_NAME},{services:[PI_SERVICE]}],optionalServices:[PI_SERVICE]});piDevice.addEventListener("gattserverdisconnected",onPiDisconnected);piStatus("Connecting to Pi…");await piAttach()}catch(error){log("Pi connection failed: "+error.message);piStatus("Pi not connected","fault");if(piDevice?.gatt.connected)piDevice.gatt.disconnect()}
-}
-function onPiDisconnected(){piChar=null;$("piConnect").textContent="Connect Pi";$("compass").classList.add("stale");if(piUserDisconnect){piStatus("Pi disconnected");log("Pi heading link closed.");return}
-  if(piRetries<5){piRetries++;piStatus(`Pi link lost · reconnecting (${piRetries}/5)`,"fault");setTimeout(()=>{if(piDevice&&!piDevice.gatt.connected&&!piUserDisconnect)piAttach().catch(error=>{log("Pi reconnect failed: "+error.message);onPiDisconnected()})},2000)}
+function onHeading(yaw,pitch,roll){if(![yaw,pitch,roll].every(Number.isFinite))return;lastYaw=yaw;$("rawYaw").textContent=yaw.toFixed(1)+"°";$("pitchValue").textContent=pitch.toFixed(1)+"°";$("rollValue").textContent=roll.toFixed(1)+"°";piLastAt=Date.now();piCount++;$("compass").classList.remove("stale");$("zeroHeading").disabled=false;renderHeading()}
+// geometry_msgs/Vector3Stamped in little-endian CDR: 4-byte encapsulation header, then header.stamp (sec, nanosec), frame_id (uint32 length incl. NUL, then bytes), then vector x,y,z float64 aligned to 8 (offsets count from after the encapsulation header). imu_node.py: x = roll, y = pitch, z = yaw, degrees.
+function decodeVector3Stamped(view,start){const base=start+4;let o=8;o+=4+view.getUint32(base+o,true);o=(o+7)&~7;return{x:view.getFloat64(base+o,true),y:view.getFloat64(base+o+8,true),z:view.getFloat64(base+o+16,true)}}
+function piSubscribe(ws,channel){if(channel.encoding!=="cdr"){log(`${PI_TOPIC} is ${channel.encoding}, expected cdr; heading unavailable.`);return}piChannelId=channel.id;piSubId=piNextSubId++;ws.send(JSON.stringify({op:"subscribe",subscriptions:[{id:piSubId,channelId:channel.id}]}))}
+function piOnMessage(ws,event){
+  if(typeof event.data==="string"){let msg;try{msg=JSON.parse(event.data)}catch{return}
+    if(msg.op==="advertise"&&piSubId===null){const channel=(msg.channels||[]).find(c=>c.topic===PI_TOPIC);if(channel)piSubscribe(ws,channel)}
+    else if(msg.op==="unadvertise"&&(msg.channelIds||[]).includes(piChannelId)){piChannelId=null;piSubId=null}
+    else if(msg.op==="status"&&msg.level>=2)log("foxglove_bridge: "+msg.message);
+    return}
+  // Binary frame: opcode (1 = message data), uint32 subscription id, uint64 receive time, then the CDR payload.
+  const view=new DataView(event.data);if(view.byteLength<13||view.getUint8(0)!==1||view.getUint32(1,true)!==piSubId)return;
+  try{const v=decodeVector3Stamped(view,13);onHeading(v.z,v.y,v.x)}catch(error){log("Bad imu/rpy message: "+error.message)}}
+function piUrl(host){return /^wss?:\/\//i.test(host)?host:(/:\d+$/.test(host)?`ws://${host}`:`ws://${host}:${PI_PORT}`)}
+function piOpen(host){
+  let ws;try{ws=new WebSocket(piUrl(host),"foxglove.websocket.v1")}catch(error){log("Pi connection failed: "+error.message);piStatus("Pi not connected","fault");return}
+  ws.binaryType="arraybuffer";piSocket=ws;piChannelId=null;piSubId=null;let opened=false;
+  ws.onopen=()=>{opened=true;piRetries=0;$("piConnect").textContent="Disconnect Pi";piStatus("Pi connected · waiting for "+PI_TOPIC,"ready");log(`Connected to foxglove_bridge at ${piUrl(host)} (heading)`)};
+  ws.onmessage=event=>piOnMessage(ws,event);
+  ws.onclose=()=>{if(piSocket!==ws)return;piSocket=null;onPiDisconnected(host,opened)}}
+function piConnect(){
+  if(piSocket){piUserDisconnect=true;piSocket.close();return}
+  // Browsers block ws:// from https:// pages; open this file directly or over http.
+  if(location.protocol==="https:"){piStatus("Open this page as a file or over http to reach the Pi","fault");return}
+  const host=$("piHost").value.trim();if(!host){piStatus("Enter the Pi's hostname or IP","fault");return}
+  try{localStorage.setItem(PI_HOST_KEY,host)}catch{}
+  piUserDisconnect=false;piRetries=0;piStatus("Connecting to Pi…");piOpen(host)}
+function onPiDisconnected(host,opened){piChannelId=null;piSubId=null;$("piConnect").textContent="Connect Pi";$("compass").classList.add("stale");if(piUserDisconnect){piStatus("Pi disconnected");log("Pi heading link closed.");return}
+  if(!opened&&piRetries===0){piStatus("Pi not reachable","fault");log(`Could not reach ${piUrl(host)}. Is run_sensors.sh running (with foxglove_bridge installed) and this computer on the Pi's network (or Tailscale)?`);return}
+  if(piRetries<5){piRetries++;piStatus(`Pi link lost · reconnecting (${piRetries}/5)`,"fault");setTimeout(()=>{if(!piSocket&&!piUserDisconnect)piOpen(host)},2000)}
   else{piStatus("Pi link lost · press Connect Pi","fault");log("Pi heading link lost; gave up after 5 reconnects.")}}
 $("piConnect").addEventListener("click",piConnect);
 $("zeroHeading").addEventListener("click",()=>{if(lastYaw===null)return;headingZero=lastYaw;renderHeading();log(`Heading zeroed at raw yaw ${lastYaw.toFixed(1)}°`)});
 $("flipHeading").addEventListener("change",renderHeading);
-setInterval(()=>{piRate=piCount;piCount=0;if(!piChar)return;const age=piLastAt?(Date.now()-piLastAt)/1000:Infinity;if(age>1){$("compass").classList.add("stale");piLastAt?piStatus(`No IMU data for ${age.toFixed(0)} s · is imu_node running?`,"fault"):piStatus("Pi connected · waiting for IMU")}else piStatus(`Live · ${piRate} Hz`,"ready")},1000);
+setInterval(()=>{piRate=piCount;piCount=0;if(!piSocket||piSocket.readyState!==WebSocket.OPEN)return;const age=piLastAt?(Date.now()-piLastAt)/1000:Infinity;if(age>1){$("compass").classList.add("stale");piLastAt?piStatus(`No IMU data for ${age.toFixed(0)} s · is imu_node running?`,"fault"):piStatus("Pi connected · waiting for "+PI_TOPIC)}else piStatus(`Live · ${piRate} Hz`,"ready")},1000);
 </script>
 </body>
 </html>

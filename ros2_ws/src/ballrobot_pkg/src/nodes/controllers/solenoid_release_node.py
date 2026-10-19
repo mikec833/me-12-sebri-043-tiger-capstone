@@ -2,16 +2,19 @@
 """
 Forward the outer loop's feeder-box trigger to the solenoid XIAO over BLE.
 
-Subscribes to std_msgs/Bool on /feeder_box_threshold_reached. On the first
-True, writes "PULSE" to the command characteristic of the XIAO nRF52840
-running solenoid_release.ino, which pulses the relay for 500 ms. The write
+Subscribes to std_msgs/Bool on /feeder_box_threshold_reached (published
+by feeder_trigger_node.py when the UWB position reaches the feeder). On
+the first True, writes the `command` parameter ("OPEN" by default) to the
+command characteristic of the feeder-box XIAO nRF52840. The write
 is sent with response, so a successful write means the XIAO received it.
 If the write fails it's retried every retry_period_s until it succeeds or
-release_timeout_s runs out; the sketch ignores PULSE during a pulse and for
-3 s after one, so a retry after a lost ack can't fire twice. Once
+release_timeout_s runs out; the sketch (feeder-box/feeder_box_xiao_nrf52840_solenoid/)
+ignores OPEN during a pulse and for 10 s after one, so a retry after a
+lost ack can't fire twice. Once
 acknowledged, this node latches: later True messages are ignored until
-restart, so the outer loop can publish True at its own rate without
-re-firing.
+a False arrives (the robot left the feeder zone), so the outer loop can
+publish True at its own rate without re-firing, and each new visit to
+the feeder sends OPEN again.
 
 A background task keeps a BLE connection to the XIAO open whenever it's in
 range (scan -> connect -> reconnect on drop), so the trigger only pays for
@@ -21,7 +24,7 @@ disconnect. BLE runs on its own asyncio thread so it never blocks the rclpy
 executor.
 
 Publishes std_msgs/Bool on /solenoid_released (transient-local, so late
-subscribers still get it) once the XIAO has acknowledged the PULSE.
+subscribers still get it) once the XIAO has acknowledged the command.
 
 Requires bleak on the Pi:
     sudo apt install python3-bleak      (or: pip install bleak)
@@ -31,6 +34,9 @@ dtoverlay=miniuart-bt rather than disable-bt in /boot/firmware/config.txt.
 
 Test without the outer loop:
     ros2 topic pub --once /feeder_box_threshold_reached std_msgs/msg/Bool "{data: true}"
+The older xiao/test1.ino/solenoid_release sketch only understands
+"PULSE"; set `command: PULSE` under solenoid_release_node in the config
+YAML if that is what's flashed.
 
 CSV export
     On shutdown, writes src/outputs/run_<id>/solenoid_log_run<id>.csv
@@ -40,6 +46,7 @@ Parameters
     xiao_name          str    "TigerBall-Latch"  must match DEVICE_NAME in the sketch
     xiao_address       str    ""     XIAO BLE address (bluetoothctl scan on);
                                      if set, used instead of xiao_name
+    command            str    "OPEN" written to the XIAO on trigger
     scan_timeout_s     float  5.0
     retry_period_s     float  0.2
     release_timeout_s  float  15.0   give up if not acknowledged within this
@@ -64,9 +71,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))
 
 from run_logging import resolve_run_output_dir
 
-# Must match COMMAND_UUID and the PULSE command in solenoid_release.ino
+# Must match COMMAND_UUID in the XIAO sketch (feeder-box/feeder_box_xiao_nrf52840_solenoid/)
 CMD_UUID = '7b6a1001-6c3a-4c9f-ae60-62b79b0e5135'
-PULSE_CMD = b'PULSE'
 
 
 class SolenoidReleaseNode(Node):
@@ -76,6 +82,7 @@ class SolenoidReleaseNode(Node):
 
         self.declare_parameter('xiao_name', 'TigerBall-Latch')
         self.declare_parameter('xiao_address', '')
+        self.declare_parameter('command', 'OPEN')
         self.declare_parameter('scan_timeout_s', 5.0)
         self.declare_parameter('retry_period_s', 0.2)
         self.declare_parameter('release_timeout_s', 15.0)
@@ -84,6 +91,7 @@ class SolenoidReleaseNode(Node):
 
         self.xiao_name = str(self.get_parameter('xiao_name').value)
         self.xiao_address = str(self.get_parameter('xiao_address').value).strip()
+        self.command = str(self.get_parameter('command').value).strip()
         self.scan_timeout = float(self.get_parameter('scan_timeout_s').value)
         self.retry_period = float(self.get_parameter('retry_period_s').value)
         self.release_timeout = float(self.get_parameter('release_timeout_s').value)
@@ -112,13 +120,17 @@ class SolenoidReleaseNode(Node):
 
     def trigger_callback(self, msg: Bool):
         if not msg.data:
+            # Robot has left the feeder zone: re-arm for the next visit
+            with self.lock:
+                self.released = False
             return
         with self.lock:
             if self.released or self.in_flight:
                 return
             self.in_flight = True
         self.log_event('trigger', '')
-        self.get_logger().info('Feeder box threshold reached -- releasing solenoid')
+        self.get_logger().info(
+            f'Feeder box threshold reached -- sending {self.command} to XIAO')
         asyncio.run_coroutine_threadsafe(self.release(), self.loop)
 
     # ---- BLE side (runs on self.loop) ------------------------------------
@@ -135,6 +147,7 @@ class SolenoidReleaseNode(Node):
             if self.client is not None and self.client.is_connected:
                 await asyncio.sleep(0.5)
                 continue
+            client = None
             try:
                 if self.xiao_address:
                     device = await BleakScanner.find_device_by_address(
@@ -155,7 +168,7 @@ class SolenoidReleaseNode(Node):
                     await client.disconnect()
                     raise RuntimeError(
                         f'{device.address} has no command characteristic {CMD_UUID}; '
-                        'is solenoid_release.ino flashed?')
+                        'is feeder_box_xiao_nrf52840_solenoid.ino flashed?')
                 self.client = client
                 self.log_event('connected', device.address)
                 self.get_logger().info(f'Connected to XIAO {device.address}')
@@ -163,7 +176,15 @@ class SolenoidReleaseNode(Node):
                 self.log_event('connect_fail', str(e))
                 self.get_logger().warn(
                     f'BLE connect to XIAO failed: {e}', throttle_duration_sec=5.0)
-                await asyncio.sleep(1.0)
+                # A timed-out connect can stay pending inside BlueZ, and every
+                # later attempt then fails with "Operation already in progress".
+                # Disconnecting cancels it.
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                await asyncio.sleep(2.0)
 
     def on_disconnect(self, _client):
         self.client = None
@@ -182,7 +203,7 @@ class SolenoidReleaseNode(Node):
             attempt += 1
             try:
                 # response=True: returns only once the XIAO has acknowledged the write.
-                await client.write_gatt_char(CMD_UUID, PULSE_CMD, response=True)
+                await client.write_gatt_char(CMD_UUID, self.command.encode(), response=True)
             except Exception as e:
                 self.log_event('write_fail', f'{e} attempt={attempt}')
                 self.get_logger().warn(
@@ -198,7 +219,7 @@ class SolenoidReleaseNode(Node):
             self.released_pub.publish(Bool(data=True))
             self.log_event('ack', f'attempt={attempt} latency_ms={latency_ms:.0f}')
             self.get_logger().info(
-                f'XIAO acknowledged PULSE (attempt {attempt}, {latency_ms:.0f} ms)')
+                f'XIAO acknowledged {self.command} (attempt {attempt}, {latency_ms:.0f} ms)')
             return
 
         # Gave up: clear in_flight so the next True from the outer loop retries.
