@@ -156,7 +156,7 @@ def generate_launch_description():
              '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
              '/wheel_states', '/wheel_speed_cmd', '/cmd_vel',
              '/feeder/distance', '/feeder_box_threshold_reached',
-             '/solenoid_released'],
+             '/solenoid_released', '/viz/pose'],
         output='screen',
         condition=IfCondition(LaunchConfiguration('record')),
     )
@@ -259,6 +259,24 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('foxglove')),
         )
 
+    # Combines uwb/position and imu/rpy yaw into one PoseStamped on
+    # viz/pose, so Foxglove's 3D panel (via foxglove_bridge above) shows
+    # the robot's live position and heading as a single arrow on the XY
+    # plane; see pose_viz_node.py. On by default; turn it off with:
+    #   ros2 launch ballrobot_pkg bringup.launch.py viz:=false
+    viz_arg = DeclareLaunchArgument(
+        'viz', default_value='true',
+        description='Start pose_viz_node (live pose and heading for Foxglove)')
+
+    pose_viz_node = Node(
+        package='ballrobot_pkg',
+        executable='pose_viz_node.py',
+        name='pose_viz_node',
+        output='screen',
+        parameters=[config_file],
+        condition=IfCondition(LaunchConfiguration('viz')),
+    )
+
     imu_quaternion_node = Node(
         package='ballrobot_pkg',
         executable='imu_quaternion_node.py',
@@ -291,6 +309,7 @@ def generate_launch_description():
         run_id_arg,
         record_arg,
         foxglove_arg,
+        viz_arg,
         config_arg,
         # Must come before the nodes: sets config_file for them
         OpaqueFunction(function=resolve_config),
@@ -304,6 +323,7 @@ def generate_launch_description():
         solenoid_release_node,
         sound_player_node,
         foxglove_bridge,
+        pose_viz_node,
         imu_quaternion_node,
         bag_recorder,
     ])
