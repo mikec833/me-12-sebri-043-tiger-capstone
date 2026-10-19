@@ -12,8 +12,9 @@ release_timeout_s runs out; the sketch (feeder-box/feeder_box_xiao_nrf52840_sole
 ignores OPEN during a pulse and for 10 s after one, so a retry after a
 lost ack can't fire twice. Once
 acknowledged, this node latches: later True messages are ignored until
-restart, so the outer loop can publish True at its own rate without
-re-firing.
+a False arrives (the robot left the feeder zone), so the outer loop can
+publish True at its own rate without re-firing, and each new visit to
+the feeder sends OPEN again.
 
 A background task keeps a BLE connection to the XIAO open whenever it's in
 range (scan -> connect -> reconnect on drop), so the trigger only pays for
@@ -119,6 +120,9 @@ class SolenoidReleaseNode(Node):
 
     def trigger_callback(self, msg: Bool):
         if not msg.data:
+            # Robot has left the feeder zone: re-arm for the next visit
+            with self.lock:
+                self.released = False
             return
         with self.lock:
             if self.released or self.in_flight:

@@ -12,8 +12,9 @@ food. It then stays True until the robot is more than
 trigger_radius_m + exit_margin_m away for confirm_samples fixes in a
 row, so UWB noise at the boundary can't flip it on and off.
 solenoid_release_node.py turns that True into the BLE OPEN
-command to the feeder-box XIAO and latches, so this node can keep
-publishing True while the robot stays in the zone.
+command to the feeder-box XIAO and latches until this node publishes
+False, so it can keep publishing True while the robot stays in the zone
+and each new entry opens the feeder again.
 
 Set feeder_position and trigger_radius_m per anchor layout in the
 config YAMLs (config/<name>.yaml, block `feeder_trigger_node`); the
