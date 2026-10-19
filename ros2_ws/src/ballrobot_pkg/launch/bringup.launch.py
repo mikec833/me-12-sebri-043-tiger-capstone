@@ -154,7 +154,7 @@ def generate_launch_description():
         cmd=['ros2', 'bag', 'record',
              '-o', ['bags/run_', LaunchConfiguration('run_id')],
              '/imu/rpy', '/imu/accel', '/imu/data_quat', '/uwb/position',
-             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel'],
+             '/wheel_states', '/wheel_speed_cmd', '/cmd_vel', '/viz/pose'],
         output='screen',
         condition=IfCondition(LaunchConfiguration('record')),
     )
@@ -238,6 +238,24 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_imu_quat')),
     )
 
+    # Combines uwb/position and imu/rpy yaw into one PoseStamped on
+    # viz/pose, so Foxglove's 3D panel shows the robot's live position and
+    # heading as a single arrow on the XY plane; see pose_viz_node.py. On
+    # by default; turn it off with:
+    #   ros2 launch ballrobot_pkg bringup.launch.py viz:=false
+    viz_arg = DeclareLaunchArgument(
+        'viz', default_value='true',
+        description='Start pose_viz_node (live pose and heading for Foxglove)')
+
+    pose_viz_node = Node(
+        package='ballrobot_pkg',
+        executable='pose_viz_node.py',
+        name='pose_viz_node',
+        output='screen',
+        parameters=[config_file],
+        condition=IfCondition(LaunchConfiguration('viz')),
+    )
+
     port_log = LogInfo(
         msg=['Motor board port: ', LaunchConfiguration('teensy_port'),
              ' | UWB port: ', LaunchConfiguration('uwb_port')],
@@ -261,6 +279,7 @@ def generate_launch_description():
         run_id_arg,
         record_arg,
         config_arg,
+        viz_arg,
         # Must come before the nodes: sets config_file for them
         OpaqueFunction(function=resolve_config),
         run_id_log,
@@ -273,5 +292,6 @@ def generate_launch_description():
         sound_player_node,
         heading_ble_node,
         imu_quaternion_node,
+        pose_viz_node,
         bag_recorder,
     ])
